@@ -2,7 +2,8 @@
   "mcpServers": {
     "bxhealth-fhir-mcp": {
       "command": "node",
-      "args": ["/Users/robpieper/mywork/bxhealth-fhir-mcp/dist/index.js"]
+      "args": ["/absolute/path/to/bxhealth-fhir-mcp/dist/index.js"],
+      "env": { "FHIR_BASE_URL": "https://your-fhir-server.example.com/fhir" }
     }
   }
 }

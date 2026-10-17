@@ -1,138 +1,249 @@
 # bxhealth-fhir-mcp
 
-MCP server exposing tools for a FHIR R4 server, authenticated against PingOne
-via the OAuth 2.0 client_credentials flow.
+MCP server exposing read-only tools for a FHIR R4 server, protected by OAuth 2.1.
 
-Runs over **stdio** (an MCP host spawns the process) or **Streamable HTTP**
-(a long-running service, which is how it runs in Kubernetes behind
-PingGateway). Derived from `fhirmcpserver`; see
-`bxhealth-demo-base/docs/mcp-gateway-program-plan.md` for the wider design.
+Runs over **stdio** (an MCP host spawns the process locally) or **Streamable
+HTTP** (a long-running service in Docker or Kubernetes). Over HTTP, every MCP
+call requires a valid OAuth access token from the configured authorization
+server (PingOne Advanced Identity Cloud in the reference setup). MCP clients
+discover where to log in from the server's 401 response and open the browser
+for the user automatically.
+
+- [How authentication works](#how-authentication-works)
+- [Configuration](#configuration)
+- [Run locally and in Docker](#run-locally-and-in-docker)
+- [Connect an MCP client](#connect-an-mcp-client)
+- [HTTP routes](#http-routes)
+- [Tools](#tools)
+- [Testing](#testing)
+- Further reading: [docs/oauth-design.md](docs/oauth-design.md) (design and decisions),
+  [docs/aic-setup.md](docs/aic-setup.md) (authorization server setup),
+  [docs/test-plan.md](docs/test-plan.md) (automated and manual test plan)
+
+## How authentication works
+
+The server is an OAuth 2.1 **resource server**, following the MCP authorization
+specification. It validates tokens; it never issues them, and it never sees the
+user's password.
+
+1. A client calls `POST /mcp` without a token.
+2. The server answers `401` with
+   `WWW-Authenticate: Bearer resource_metadata="<base>/.well-known/oauth-protected-resource/mcp", scope="fhir-mcp:read"`.
+3. The client reads that metadata (RFC 9728), which names the authorization
+   server (`OAUTH_ISSUER`).
+4. The client opens the user's browser for an authorization code login with
+   PKCE, using a pre-registered public OAuth client.
+5. The authorization server issues a JWT access token whose `aud` is this
+   server's `MCP_PUBLIC_URL` and whose scope includes `fhir-mcp:read`.
+6. The client retries with `Authorization: Bearer <token>` and keeps sending it
+   on every request.
+
+On every request (POST, GET and DELETE on `/mcp`) the server checks the token's
+signature against the issuer's JWKS, the algorithm (`OAUTH_ALGORITHMS`), the
+issuer (exact match), the audience, `exp`/`nbf`, `sub`, and the required scopes.
+
+| Result | Response |
+| --- | --- |
+| No token, malformed, bad signature, wrong issuer/audience, expired | `401`, `error="invalid_token"` plus `resource_metadata` |
+| Valid token without the required scope | `403`, `error="insufficient_scope"` |
+| Browser request from an origin not in `MCP_ALLOWED_ORIGINS` | `403` |
+| Issuer metadata or JWKS unreachable | `500`; `/readyz` reports `oauth-not-ready` |
+
+Other guarantees:
+
+- **No unauthenticated HTTP mode.** With `MCP_TRANSPORT=http` the server
+  refuses to start unless `OAUTH_ISSUER` and `MCP_PUBLIC_URL` are set, and
+  both must be `https` unless they point at localhost.
+- **Sessions are not credentials.** A session is bound to the identity
+  (issuer, subject, client) that opened it; another identity presenting the
+  same `Mcp-Session-Id` gets `404`.
+- **No token passthrough.** The caller's token is never sent to FHIR. Calls to
+  FHIR use the server's own credentials (`FHIR_AUTH`), or none.
+- **Audit log.** Each tool call writes one JSON line to stderr with the
+  caller's `sub` and `client_id`, the tool name, outcome and duration. Tokens
+  and tool arguments (which can contain patient data) are never logged.
+- **stdio has no OAuth**, per the MCP specification: a local process is
+  trusted by whoever launched it.
 
 ## Configuration
 
-All configuration comes from environment variables. Copy the example file and
-fill in your own values:
+All configuration comes from environment variables, validated at startup; an
+invalid or incomplete configuration stops the server with a list of the
+problems. Copy the example file and fill in your own values:
 
 ```bash
 cp .env.example .env
 ```
 
-| Variable | Description |
-| --- | --- |
-| `PINGONE_ENV_ID` | PingOne environment ID (also used to build the token URL) |
-| `PINGONE_CLIENT_ID` | PingOne client ID |
-| `PINGONE_CLIENT_SECRET` | PingOne client secret |
-| `FHIR_BASE_URL` | FHIR R4 base URL, including the `/fhir` path |
-| `MCP_TRANSPORT` | `stdio` (default) or `http` |
-| `PORT` | HTTP port, default `3000` (http transport only) |
-| `HOST` | HTTP bind address, default `0.0.0.0` (http transport only) |
-| `MCP_SESSION_IDLE_MINUTES` | Close sessions idle this long, default `30` (http transport only) |
-| `MCP_MAX_SESSIONS` | Refuse new sessions (HTTP 503) beyond this many, default `100` (http transport only) |
+`.env` is read from the project root. Variables already set in the environment
+take precedence. `.env` is gitignored; never commit real credentials.
 
-`.env` is read at startup from the project root. Variables already set in the
-environment take precedence, so an MCP host or shell export can override the
-file. `.env` is gitignored — never commit real credentials.
+### Server
 
-The PingOne application must have the `client_credentials` grant enabled and use
-`client_secret_basic` authentication. If a token cannot be obtained, requests
-are attempted without an `Authorization` header.
+| Variable | Default | Description |
+| --- | --- | --- |
+| `FHIR_BASE_URL` | required | FHIR R4 base URL, including the `/fhir` path |
+| `MCP_TRANSPORT` | `stdio` | `stdio` or `http` |
+| `PORT` / `HOST` | `3000` / `0.0.0.0` | HTTP listen port and address |
+| `MCP_READ_ONLY` | `true` | Expose only tools that cannot change FHIR data (see [Tools](#tools)) |
+| `MCP_SESSION_IDLE_MINUTES` | `30` | Close HTTP sessions idle this long |
+| `MCP_MAX_SESSIONS` | `100` | Refuse new HTTP sessions (`503`) beyond this many |
+| `MCP_ALLOWED_ORIGINS` | none | Comma-separated browser origins allowed to call `/mcp` (CORS). Requests without an `Origin` header (CLI and desktop clients) are always allowed |
 
-## Build and run
+### OAuth (required for `MCP_TRANSPORT=http`)
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `MCP_PUBLIC_URL` | required | The URL clients use to reach `/mcp`, e.g. `http://localhost:3000/mcp` or `https://fhir-mcp.example.com/mcp`. This is the OAuth resource identifier. Set it explicitly behind a load balancer; it is never derived from request headers |
+| `OAUTH_ISSUER` | required | The authorization server's issuer, **exactly** as it appears in the token's `iss` claim. AIC includes `:443`, e.g. `https://<tenant>.forgeblocks.com:443/am/oauth2/realms/root/realms/alpha` |
+| `OAUTH_REQUIRED_SCOPES` | `fhir-mcp:read` | Space-separated scopes every token must carry |
+| `OAUTH_AUDIENCE` | `MCP_PUBLIC_URL` | Value that must appear in the token's `aud`. Override only as a temporary workaround; see [docs/aic-setup.md](docs/aic-setup.md) |
+| `OAUTH_JWKS_URI` | from discovery | Override for the issuer's JWKS URL |
+| `OAUTH_ALGORITHMS` | `RS256,ES256` | Accepted signing algorithms. `none` and `HS*` are always refused |
+| `OAUTH_CLOCK_SKEW_SECONDS` | `30` | Tolerance for `nbf`/`iat`. Expired tokens are never accepted |
+
+At startup the server fetches the issuer's metadata
+(`<issuer>/.well-known/openid-configuration`, then the RFC 8414 location) and
+requires its `issuer` to equal `OAUTH_ISSUER`. A mismatch is reported in the
+log and on `/readyz`, and every request fails until it is fixed.
+
+### Outbound calls to FHIR
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `FHIR_AUTH` | `none` | `none`: no `Authorization` header. `client_credentials`: the server's own PingOne token |
+| `PINGONE_ENV_ID`, `PINGONE_CLIENT_ID`, `PINGONE_CLIENT_SECRET` | — | Required only with `FHIR_AUTH=client_credentials` (PingOne `client_secret_basic`). If a token cannot be obtained, the tool call fails; it is never sent unauthenticated |
+
+## Run locally and in Docker
+
+Requires Node.js 22.12 or later.
 
 ```bash
 npm install
 npm run build
-npm start          # stdio
-npm run start:http # Streamable HTTP on PORT (default 3000)
+npm start            # stdio
+npm run start:http   # Streamable HTTP; needs the OAuth settings
+npm run dev          # stdio, live TypeScript
+npm run dev:http     # HTTP, live TypeScript
 ```
 
-Tests (Node's built-in runner against a local stub FHIR server; no
-credentials or network needed):
-
-```bash
-npm test
-```
-
-For development with live TypeScript:
-
-```bash
-npm run dev        # stdio
-npm run dev:http   # Streamable HTTP
-```
-
-## HTTP transport
-
-| Route | Purpose |
-| --- | --- |
-| `POST /mcp` | JSON-RPC requests. A request with no `Mcp-Session-Id` must be an `initialize`; the response carries the new session id. |
-| `GET /mcp` | The SSE stream for an established session. |
-| `DELETE /mcp` | Ends a session. |
-| `GET /healthz` | Liveness. Never touches FHIR, so a FHIR outage cannot restart the pod. |
-| `GET /readyz` | Readiness. Pings the FHIR CapabilityStatement and reports the `fhirVersion` the server advertises, which is the cheapest way to catch an R4/R5 mismatch. |
-
-Sessions are held in memory, so the HTTP service is **single-replica** unless
-sticky sessions or a shared session store are added first.
-
-Smoke test:
-
-```bash
-curl -sS -X POST http://localhost:3000/mcp \
-  -H 'Content-Type: application/json' \
-  -H 'Accept: application/json, text/event-stream' \
-  -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"curl","version":"1.0.0"}}}'
-```
-
-Or point the MCP Inspector at `http://localhost:3000/mcp`:
-
-```bash
-npx @modelcontextprotocol/inspector
-```
-
-## Container
+Docker:
 
 ```bash
 docker build -f infra/Dockerfile -t bxhealth-fhir-mcp .
 docker run --rm -p 3000:3000 --env-file .env bxhealth-fhir-mcp
 ```
 
-The image defaults to `MCP_TRANSPORT=http` and runs as the non-root `node`
-user.
+The image defaults to `MCP_TRANSPORT=http` and runs as UID 1000. For Docker on
+your machine, `MCP_PUBLIC_URL=http://localhost:3000/mcp` (match the published
+port). Check it is up and wired correctly:
 
-## Registering with an MCP host
+```bash
+curl -s localhost:3000/healthz
+curl -s localhost:3000/readyz      # oauth state + FHIR fhirVersion
+curl -s localhost:3000/.well-known/oauth-protected-resource/mcp
+curl -si -X POST localhost:3000/mcp -H 'Content-Type: application/json' -d '{}' | grep -i www-authenticate
+```
 
-`mcp.json` shows the stdio server registration:
+## Connect an MCP client
+
+Before connecting, the authorization server needs a public OAuth client for
+MCP clients and must issue tokens with the right audience and scope; see
+[docs/aic-setup.md](docs/aic-setup.md).
+
+### MCP Inspector
+
+```bash
+npx @modelcontextprotocol/inspector
+```
+
+Choose **Streamable HTTP**, URL `http://localhost:3000/mcp`. In the
+authentication settings enter the public client ID and scope
+`openid fhir-mcp:read`, then connect. The Inspector opens the browser for the
+AIC login and returns with a token. Its callback URL
+(`http://localhost:6274/oauth/callback` by default) must be registered on the
+client. If you use the Inspector's direct (browser) connection mode instead of
+its proxy, add its origin to `MCP_ALLOWED_ORIGINS`, e.g.
+`MCP_ALLOWED_ORIGINS=http://localhost:6274`.
+
+### Claude Code
+
+```bash
+claude mcp add --transport http bxhealth-fhir http://localhost:3000/mcp
+```
+
+Then run `/mcp` in Claude Code and choose to authenticate; the browser opens
+for the login. Because the client is pre-registered, Claude Code needs its
+client ID and a callback URL registered on that client; check
+`claude mcp add --help` for the client ID and callback port options in your
+version.
+
+### Claude Desktop and claude.ai
+
+Custom connectors connect from Anthropic's infrastructure, so they need a
+public HTTPS `MCP_PUBLIC_URL`; they cannot reach `localhost`. Test these once
+the server is deployed.
+
+### stdio registration (no OAuth)
+
+`mcp.json` shows a local stdio registration; adjust the path:
 
 ```json
 {
   "mcpServers": {
     "bxhealth-fhir-mcp": {
       "command": "node",
-      "args": ["/absolute/path/to/bxhealth-fhir-mcp/dist/index.js"]
+      "args": ["/absolute/path/to/bxhealth-fhir-mcp/dist/index.js"],
+      "env": { "FHIR_BASE_URL": "https://your-fhir-server.example.com/fhir" }
     }
   }
 }
 ```
 
-Adjust the path to wherever you cloned the project.
+## HTTP routes
+
+| Route | Auth | Purpose |
+| --- | --- | --- |
+| `POST /mcp` | Bearer token | JSON-RPC requests. A request without `Mcp-Session-Id` must be `initialize`; the response carries the new session id |
+| `GET /mcp` | Bearer token | The SSE stream for an established session |
+| `DELETE /mcp` | Bearer token | Ends a session |
+| `GET /.well-known/oauth-protected-resource/mcp` | none | Protected Resource Metadata (RFC 9728); also served at `/.well-known/oauth-protected-resource` |
+| `GET /healthz` | none | Liveness. Touches neither FHIR nor the authorization server |
+| `GET /readyz` | none | Readiness: issuer metadata resolved, then FHIR CapabilityStatement reachable; reports the FHIR server's `fhirVersion` |
+
+Sessions are held in memory, so the HTTP service is **single-replica** unless
+sticky sessions or a shared session store are added first.
 
 ## Tools
 
-Generic FHIR operations:
+Tools are listed with the MCP `readOnlyHint` annotation. With
+`MCP_READ_ONLY=true` (the default) only read-only tools are listed, and calls
+to the others are rejected as unknown tools.
 
-- `fhir_get_metadata` — fetch the server CapabilityStatement
-- `fhir_read_resource` / `fhir_vread_resource` — read a resource, optionally at a version
-- `fhir_search_resources` — search any resource type
-- `fhir_create_resource` / `fhir_update_resource` / `fhir_patch_resource` / `fhir_delete_resource`
-- `fhir_resource_history` / `fhir_type_history` — history for one resource or a whole type
-- `fhir_validate_resource` — validate a resource against the server's profiles
-- `fhir_execute_operation` — invoke an arbitrary `$operation`
-- `fhir_transaction` — submit a transaction or batch Bundle
-- `fhir_patient_everything` — `Patient/$everything`
+| Tool | Read-only | Purpose |
+| --- | --- | --- |
+| `fhir_get_metadata` | yes | Server CapabilityStatement |
+| `fhir_read_resource` / `fhir_vread_resource` | yes | Read a resource, optionally at a version |
+| `fhir_search_resources` | yes | Search any resource type |
+| `fhir_resource_history` / `fhir_type_history` | yes | History for one resource or a whole type |
+| `fhir_patient_everything` | yes | `Patient/$everything` |
+| `fhir_validate_resource` | yes | `$validate` (POSTs the resource but stores nothing) |
+| `fhir_search_patients`, `_observations`, `_conditions`, `_medication_requests`, `_encounters` | yes | Convenience searches |
+| `fhir_create_resource` / `fhir_update_resource` / `fhir_patch_resource` / `fhir_delete_resource` | no | Write operations |
+| `fhir_transaction` | no | Transaction or batch Bundle |
+| `fhir_execute_operation` | no | Any `$operation`, including ones that modify data |
 
-Convenience searches:
+## Testing
 
-- `fhir_search_patients`
-- `fhir_search_observations`
-- `fhir_search_conditions`
-- `fhir_search_medication_requests`
-- `fhir_search_encounters`
+```bash
+npm test                                     # all suites
+npm test -- --test-name-pattern="audience"   # matching tests only
+```
+
+The suites run against local stub servers: a stub issuer that serves OIDC
+discovery and a JWKS from keys generated in the test, and a stub FHIR server.
+No network or real authorization server is needed, and CI runs them on every
+push. Manual end-to-end steps for Docker and Kubernetes are in
+[docs/test-plan.md](docs/test-plan.md).
+
+Deployment to Kubernetes is described in [infra/k8s/README.md](infra/k8s/README.md).
