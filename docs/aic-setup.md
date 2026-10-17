@@ -179,7 +179,7 @@ themselves: give each one the document URL as its client ID.
    | Setting | Value |
    | --- | --- |
    | CIMD Client ID URL Patterns | Where the documents are hosted, as narrowly as possible, e.g. `https://<host>/<path>/*`. Anyone who can publish a file under this prefix becomes a client |
-   | CIMD Metadata Override Deny List | `scope`, `grant_types`, `response_types`, `token_endpoint_auth_method`. Add `redirect_uri` to pin redirect URIs in the profile instead of trusting the document |
+   | CIMD Metadata Override Deny List | `scope`, `grant_types`, `response_types`, `token_endpoint_auth_method`, `client_name` (step 7). Add `redirect_uri` to pin redirect URIs in the profile instead of trusting the document |
    | CIMD SSRF Protection Enabled | `true` (the default) |
 
    If no profile matches a client ID, or more than one does, AIC returns
@@ -193,9 +193,13 @@ themselves: give each one the document URL as its client ID.
 6. **Audience script.** No change: the script in step 3 keys on the
    requested `resource`, not on the client. Confirm it runs for CIMD clients
    by decoding a token (below).
-7. **Consent.** The consent page shows `client_name` from the document, which
-   anyone hosting under your pattern controls. Check it also shows the client
-   ID URL or its host.
+7. **Consent.** By default the consent page shows `client_name` from the
+   document, which anyone who can publish under your pattern controls. Add
+   `client_name` to the profile's **CIMD Metadata Override Deny List** and set
+   a fixed name on the profile (e.g. `bxhealth FHIR MCP (CIMD)`), so the
+   consent page always shows your name. Leave **Allow Clients to Skip
+   Consent** off on the OAuth2 Provider's Consent tab. During the first CIMD
+   login, check what the consent page actually shows (test D3).
 8. **Dynamic registration.** The realm advertises a `registration_endpoint`.
    Unless something depends on it, turn off open dynamic client
    registration, so clients can't register their way around the profile.

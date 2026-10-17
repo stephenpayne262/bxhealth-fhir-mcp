@@ -158,7 +158,7 @@ from Ping's documentation. Paths are in the AM native console.
    | Setting | Value |
    | --- | --- |
    | CIMD Client ID URL Patterns | The hosting prefix, e.g. `https://<host>/<path>/*`. Keep it as narrow as possible: anyone who can publish a file under this prefix becomes a client |
-   | CIMD Metadata Override Deny List | `scope`, `grant_types`, `response_types`, `token_endpoint_auth_method`. Add `redirect_uri` too, if you'd rather fix redirect URIs in the profile than trust the document |
+   | CIMD Metadata Override Deny List | `scope`, `grant_types`, `response_types`, `token_endpoint_auth_method`, `client_name` (step 7). Add `redirect_uri` too, if you'd rather fix redirect URIs in the profile than trust the document |
    | CIMD SSRF Protection Enabled | `true` (leave the default) |
 4. **Set the profile's client defaults** (Core tab):
    - **Scope(s):** `fhir-mcp:read` only. Because `scope` is deny-listed, a
@@ -172,9 +172,9 @@ from Ping's documentation. Paths are in the AM native console.
 6. **Audience script.** Leave the access token modification script as it is
    (it keys on `resource`, not on the client), but confirm in step D3 that it
    runs for CIMD clients.
-7. **Consent.** The consent page shows `client_name`, which comes from the
-   document and so can't be trusted. Check that the page also shows the
-   client ID URL (or its host). If it doesn't, rely on the narrow URL pattern.
+7. **Consent.** Deny-list `client_name` and set a fixed name on the
+   profile, so the consent page can't show a name taken from the document.
+   Leave **Allow Clients to Skip Consent** off on the OAuth2 Provider.
 8. **Dynamic registration.** Our realm advertises a `registration_endpoint`.
    Unless something else depends on it, turn off open dynamic client
    registration, so MCP clients can't register their own clients and get
