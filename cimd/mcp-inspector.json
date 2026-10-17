@@ -1,0 +1,14 @@
+{
+  "client_id": "https://CIMD_HOST/CIMD_PATH/mcp-inspector.json",
+  "client_name": "MCP Inspector (bxhealth-fhir-mcp)",
+  "redirect_uris": [
+    "http://127.0.0.1:6274/oauth/callback",
+    "http://127.0.0.1:6274/oauth/callback/debug",
+    "http://localhost:6274/oauth/callback",
+    "http://localhost:6274/oauth/callback/debug"
+  ],
+  "grant_types": ["authorization_code"],
+  "response_types": ["code"],
+  "token_endpoint_auth_method": "none",
+  "scope": "fhir-mcp:read"
+}

@@ -98,6 +98,20 @@ session also records `[iss, sub, client_id]` from the token that opened it,
 and other identities get the same `404` as for an unknown session. A token
 refresh for the same user keeps the session.
 
+**Which clients are accepted (`OAUTH_CLIENT_MODE`).** The authorization
+server decides who gets a token, but any client in the realm can ask for one
+with this server as the audience. So the server also checks the token's
+`client_id` (or `azp`). In `public` mode it must be in
+`OAUTH_ALLOWED_CLIENT_IDS`; an empty list accepts any client, for
+compatibility, with a warning at startup. In `cimd` mode it must be the
+HTTPS URL of a Client ID Metadata Document matching
+`OAUTH_CIMD_CLIENT_ID_PATTERNS` (an exact URL, or a prefix ending in `/*`,
+the same syntax as an AIC CIMD profile). The URL must be in canonical form,
+so the string checked is the one the authorization server fetched. A
+refused client gets the same generic `401` as any other bad token; the log
+says why. Each mode has its own variable, and setting the other's is a
+startup error. Details: [cimd-plan.md](cimd-plan.md).
+
 **Read-only via an explicit per-tool flag.** Every tool must declare
 `readOnly`, so a new tool can't be added without classifying it.
 `fhir_execute_operation` is classed as a write tool, since it can invoke any
@@ -112,6 +126,7 @@ names, identifiers and other patient data.
 - Revocation is not detected before `exp` (see above).
 - Sessions live in memory, so the service runs as a single replica.
 - Dynamic Client Registration is not supported. MCP clients use a
-  pre-registered public client.
+  pre-registered public client, or a Client ID Metadata Document in
+  `OAUTH_CLIENT_MODE=cimd`.
 - Only bearer tokens in the `Authorization` header are accepted, not query
   parameters or form bodies, as OAuth 2.1 requires.

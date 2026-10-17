@@ -41,7 +41,7 @@ async function readyz(_req: Request, res: Response, oauth?: OAuthStatus): Promis
     const reported = capability?.fhirVersion;
     res.status(200).json({
       status: "ready",
-      ...(oauth ? { oauth } : {}),
+      ...(oauth ? { oauth: { ...oauth, clientMode: config.oauth?.clientPolicy.mode } } : {}),
       fhir: {
         baseUrl: config.fhir.baseUrl,
         expectedVersion: config.fhir.version,

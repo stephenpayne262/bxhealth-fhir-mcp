@@ -3,6 +3,7 @@ import type { OAuthTokenVerifier } from "@modelcontextprotocol/sdk/server/auth/p
 import { InvalidTokenError, ServerError } from "@modelcontextprotocol/sdk/server/auth/errors.js";
 import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 import type { OAuthConfig } from "../config-schema.js";
+import { clientRejection } from "./client-policy.js";
 import { IssuerMismatchError, fetchIssuerMetadata } from "./discovery.js";
 
 /**
@@ -10,7 +11,8 @@ import { IssuerMismatchError, fetchIssuerMetadata } from "./discovery.js";
  *
  * Checked on every request: signature (key chosen by `kid`), algorithm
  * allowlist, `iss` (exact), `aud` (must contain our resource identifier),
- * `exp`/`nbf` with clock skew, and presence of `sub`. Scope is checked by
+ * `exp`/`nbf` with clock skew, presence of `sub`, and that the client is
+ * allowed by OAUTH_CLIENT_MODE (client-policy.ts). Scope is checked by
  * the SDK's requireBearerAuth against the scopes returned here.
  *
  * Errors sent to clients are deliberately generic; the specific reason is
@@ -103,9 +105,16 @@ export class JwtTokenVerifier implements OAuthTokenVerifier {
       throw new InvalidTokenError("The access token is invalid or expired");
     }
 
+    const clientId = stringClaim(payload, "client_id") ?? stringClaim(payload, "azp");
+    const rejection = clientRejection(clientId, this.config.clientPolicy);
+    if (rejection) {
+      console.error(`[oauth] rejected token: ${rejection} (client_id=${JSON.stringify(clientId ?? null)})`);
+      throw new InvalidTokenError("The access token is invalid or expired");
+    }
+
     return {
       token,
-      clientId: stringClaim(payload, "client_id") ?? stringClaim(payload, "azp") ?? "unknown",
+      clientId: clientId ?? "unknown",
       scopes: scopesOf(payload),
       expiresAt: payload.exp,
       extra: { sub: payload.sub, iss: payload.iss, jti: payload.jti },

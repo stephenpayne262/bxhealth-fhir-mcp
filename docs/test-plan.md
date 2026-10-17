@@ -87,6 +87,27 @@ this.
 | C7 | Rotate the AIC signing key, or follow AIC's key rollover procedure | New tokens accepted without restarting the server. Old tokens accepted until they expire if the old key is still published |
 | C8 | `kubectl logs` | Same as B15 |
 
+## D. Manual: CIMD clients (`OAUTH_CLIENT_MODE=cimd`)
+
+Prerequisites: the documents in `cimd/` are hosted and the AIC CIMD profile is
+set up ([aic-setup.md](aic-setup.md), section 8). The server runs locally
+with `OAUTH_CLIENT_MODE=cimd` and `OAUTH_CIMD_CLIENT_ID_PATTERNS` set to the
+profile's pattern.
+
+| # | Step | Expected |
+| --- | --- | --- |
+| D1 | The `curl` check in [cimd/README.md](../cimd/README.md), for each document | `200`, no redirect, at most 5 KB, `client_id` equals the URL |
+| D2 | Start the server | Log line `client mode cimd; client ID patterns: ...`. `/readyz` has `"clientMode": "cimd"` |
+| D3 | Connect the Inspector with the document URL as client ID, then decode the token | Consent shows the client. `client_id` (or `azp`) is the document URL, `aud` = `MCP_PUBLIC_URL`, `scope` is only `fhir-mcp:read` |
+| D4 | `claude mcp add ... --client-id <claude-code.json URL> --callback-port 8765`, then `/mcp` > Authenticate, then a FHIR search | Tools work. The audit line's `client_id` is the document URL |
+| D5 | Use a client ID URL outside the profile's pattern | AIC refuses with `invalid_client` before the login page |
+| D6 | Use a `redirect_uri` not in the document (e.g. a different callback port) | AIC refuses the authorization request |
+| D7 | Host a copy of a document whose `client_id` differs from its URL | AIC refuses the client |
+| D8 | Have a document ask for more scope (e.g. `"scope": "fhir-mcp:read openid profile"`) | The token still carries only the profile's scopes |
+| D9 | With the server in `cimd` mode, connect with `fhir-mcp-public` | Login succeeds at AIC, but the server returns `401`. Log: `client_id is not a canonical https metadata document URL (client_id="fhir-mcp-public")` |
+| D10 | Switch to `OAUTH_CLIENT_MODE=public` with `OAUTH_ALLOWED_CLIENT_IDS=fhir-mcp-public`, then connect with a CIMD client | `401`. Log: `client_id is not in OAUTH_ALLOWED_CLIENT_IDS` |
+| D11 | Set `OAUTH_CLIENT_MODE=cimd` without `OAUTH_CIMD_CLIENT_ID_PATTERNS` | The server exits at startup with "is required when OAUTH_CLIENT_MODE=cimd" |
+
 ## Regression checks for every change
 
 - `npm run typecheck && npm test && npm run build`

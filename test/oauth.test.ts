@@ -343,6 +343,48 @@ describe("issuer, audience and subject", () => {
   });
 });
 
+describe("client mode", () => {
+  // Separate verifiers with an overridden policy, so this suite's server keeps
+  // its default (public mode, empty list) for every other test.
+  const verifierWith = (clientPolicy: import("../src/oauth/client-policy").ClientPolicy) =>
+    new verifierModule.JwtTokenVerifier({ ...configModule.config.oauth!, clientPolicy });
+  const CIMD_ID = "https://cimd.example.com/clients/claude-code.json";
+
+  test("the default policy accepts any client, and /readyz reports the mode", async () => {
+    await openSession(await mint({ client_id: "whatever" }));
+    const body = (await (await fetch(`${mcpBase}/readyz`)).json()) as any;
+    assert.equal(body.oauth.clientMode, "public");
+  });
+
+  test("public mode with a list refuses other clients, and logs which one", async () => {
+    const verifier = verifierWith({ mode: "public", allowedClientIds: ["fhir-mcp-public"] });
+    const info = await verifier.verifyAccessToken(await mint({ client_id: "fhir-mcp-public" }));
+    assert.equal(info.clientId, "fhir-mcp-public");
+    await assert.rejects(verifier.verifyAccessToken(await mint({ client_id: "other-app" })), /invalid or expired/);
+    await assert.rejects(verifier.verifyAccessToken(await mint({ client_id: CIMD_ID })), /invalid or expired/);
+    assert.ok(logged.some((line) => line.includes('not in OAUTH_ALLOWED_CLIENT_IDS (client_id="other-app")')));
+  });
+
+  test("cimd mode accepts a matching document URL from client_id or azp", async () => {
+    const verifier = verifierWith({ mode: "cimd", patterns: ["https://cimd.example.com/clients/*"] });
+    assert.equal((await verifier.verifyAccessToken(await mint({ client_id: CIMD_ID }))).clientId, CIMD_ID);
+    const viaAzp = await verifier.verifyAccessToken(await mint({ azp: CIMD_ID }, rsKey, ["client_id"]));
+    assert.equal(viaAzp.clientId, CIMD_ID);
+  });
+
+  test("cimd mode refuses the public client, other URLs and tokens without a client", async () => {
+    const verifier = verifierWith({ mode: "cimd", patterns: ["https://cimd.example.com/clients/*"] });
+    for (const claims of [
+      { client_id: "fhir-mcp-public" },
+      { client_id: "https://attacker.example/clients/claude-code.json" },
+    ]) {
+      await assert.rejects(verifier.verifyAccessToken(await mint(claims)), /invalid or expired/, JSON.stringify(claims));
+    }
+    await assert.rejects(verifier.verifyAccessToken(await mint({}, rsKey, ["client_id"])), /invalid or expired/);
+    assert.ok(logged.some((line) => line.includes("token has no client_id or azp")));
+  });
+});
+
 describe("scope", () => {
   test("missing required scope gets 403 insufficient_scope", async () => {
     const res = await assertRejected(await mint({ scope: "openid profile" }), 403);

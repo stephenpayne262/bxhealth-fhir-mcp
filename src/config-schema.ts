@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { patternProblem, type ClientPolicy } from "./oauth/client-policy.js";
 
 /**
  * Pure parsing and validation of the environment into a typed config.
@@ -75,6 +76,9 @@ const EnvSchema = z
       .transform((v) => v.split(",").map((s) => s.trim()).filter(Boolean))
       .pipe(z.array(z.enum(ALLOWED_ALGORITHMS)).min(1)),
     OAUTH_CLOCK_SKEW_SECONDS: z.coerce.number().int().min(0).max(300).default(30),
+    OAUTH_CLIENT_MODE: z.enum(["public", "cimd"]).default("public"),
+    OAUTH_ALLOWED_CLIENT_IDS: list(/,/),
+    OAUTH_CIMD_CLIENT_ID_PATTERNS: list(/,/),
 
     FHIR_BASE_URL: z.string().trim().url(),
     FHIR_AUTH: z.enum(["none", "client_credentials"]).default("none"),
@@ -94,6 +98,7 @@ const EnvSchema = z
           });
         }
       }
+      checkClientMode(env, ctx);
     }
     if (env.FHIR_AUTH === "client_credentials") {
       for (const name of ["PINGONE_ENV_ID", "PINGONE_CLIENT_ID", "PINGONE_CLIENT_SECRET"] as const) {
@@ -108,6 +113,39 @@ const EnvSchema = z
     }
   });
 
+/**
+ * Each client mode has its own variable, and setting the other mode's is an
+ * error, so a half-switched .env fails at startup instead of silently
+ * accepting the wrong clients.
+ */
+function checkClientMode(
+  env: { OAUTH_CLIENT_MODE: "public" | "cimd"; OAUTH_ALLOWED_CLIENT_IDS: string[]; OAUTH_CIMD_CLIENT_ID_PATTERNS: string[] },
+  ctx: z.RefinementCtx
+): void {
+  const issue = (path: string, message: string) => ctx.addIssue({ code: z.ZodIssueCode.custom, path: [path], message });
+  if (env.OAUTH_CLIENT_MODE === "public") {
+    if (env.OAUTH_CIMD_CLIENT_ID_PATTERNS.length > 0) {
+      issue("OAUTH_CIMD_CLIENT_ID_PATTERNS", "is only used when OAUTH_CLIENT_MODE=cimd");
+    }
+    for (const id of env.OAUTH_ALLOWED_CLIENT_IDS) {
+      if (/^https?:\/\//i.test(id)) {
+        issue("OAUTH_ALLOWED_CLIENT_IDS", `"${id}" is a URL; metadata document client IDs need OAUTH_CLIENT_MODE=cimd`);
+      }
+    }
+    return;
+  }
+  if (env.OAUTH_ALLOWED_CLIENT_IDS.length > 0) {
+    issue("OAUTH_ALLOWED_CLIENT_IDS", "is only used when OAUTH_CLIENT_MODE=public");
+  }
+  if (env.OAUTH_CIMD_CLIENT_ID_PATTERNS.length === 0) {
+    issue("OAUTH_CIMD_CLIENT_ID_PATTERNS", "is required when OAUTH_CLIENT_MODE=cimd");
+  }
+  for (const pattern of env.OAUTH_CIMD_CLIENT_ID_PATTERNS) {
+    const problem = patternProblem(pattern);
+    if (problem) issue("OAUTH_CIMD_CLIENT_ID_PATTERNS", `"${pattern}" ${problem}`);
+  }
+}
+
 export interface OAuthConfig {
   /** Exact `iss` value tokens must carry, e.g. AIC's `https://<tenant>:443/am/oauth2/realms/root/realms/alpha`. */
   issuer: string;
@@ -118,6 +156,8 @@ export interface OAuthConfig {
   jwksUri?: string;
   algorithms: string[];
   clockSkewSeconds: number;
+  /** Which clients' tokens are accepted (OAUTH_CLIENT_MODE). */
+  clientPolicy: ClientPolicy;
 }
 
 export type FhirAuthConfig =
@@ -162,6 +202,10 @@ export function parseConfig(env: Record<string, string | undefined>): Config {
           jwksUri: e.OAUTH_JWKS_URI,
           algorithms: e.OAUTH_ALGORITHMS,
           clockSkewSeconds: e.OAUTH_CLOCK_SKEW_SECONDS,
+          clientPolicy:
+            e.OAUTH_CLIENT_MODE === "cimd"
+              ? { mode: "cimd", patterns: e.OAUTH_CIMD_CLIENT_ID_PATTERNS }
+              : { mode: "public", allowedClientIds: e.OAUTH_ALLOWED_CLIENT_IDS },
         }
       : null;
 

@@ -216,6 +216,14 @@ export function startHttpServer(): void {
     console.error(`[http] MCP server listening on http://${host}:${port}/mcp`);
     console.error(`[http] FHIR ${config.fhir.version} base: ${config.fhir.baseUrl}`);
     console.error(`[http] OAuth resource ${config.server.publicUrl}, issuer ${config.oauth?.issuer}`);
+    const policy = config.oauth?.clientPolicy;
+    if (policy?.mode === "cimd") {
+      console.error(`[http] client mode cimd; client ID patterns: ${policy.patterns.join(", ")}`);
+    } else if (policy?.allowedClientIds.length) {
+      console.error(`[http] client mode public; allowed client IDs: ${policy.allowedClientIds.join(", ")}`);
+    } else {
+      console.error("[http] client mode public; WARNING: OAUTH_ALLOWED_CLIENT_IDS is empty, so any client of the issuer is accepted");
+    }
   });
 
   // Sweep at a fraction of the idle timeout; unref so it never holds the

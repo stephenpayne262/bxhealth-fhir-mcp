@@ -1,6 +1,8 @@
 # Plan: Client ID Metadata Documents (CIMD) with PingOne AIC
 
-Status: proposed. Branch: `PayneUpdate-cimd`. Builds on phase 1
+Status: server side built (config, client check, tests, docs, document
+templates in `cimd/`); AIC configuration and manual tests (test-plan.md
+section D) pending. Branch: `PayneUpdate-cimd`. Builds on phase 1
 ([oauth-design.md](oauth-design.md)), where MCP clients log in through the
 pre-registered public client `fhir-mcp-public`.
 
@@ -120,9 +122,10 @@ can be added later if a gradual cut-over is needed.
   path traversal and `?query` suffixes.
 - `test/oauth.test.ts` (public mode): with `OAUTH_ALLOWED_CLIENT_IDS` set, a
   token from another client gets 401.
-- New `test/oauth-cimd.test.ts` (own process, `OAUTH_CLIENT_MODE=cimd`): a
-  matching URL `client_id` is accepted. A non-matching URL, `fhir-mcp-public`,
-  and a token without `client_id`/`azp` all get 401.
+- `test/oauth.test.ts` (cimd mode, through a verifier built with a cimd
+  policy, so no separate process is needed): a matching URL in `client_id`
+  or `azp` is accepted. A non-matching URL, `fhir-mcp-public`, and a token
+  without `client_id`/`azp` are all refused.
 
 ### Documents in the repo
 

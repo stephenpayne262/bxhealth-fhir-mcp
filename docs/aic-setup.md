@@ -148,6 +148,75 @@ Do not paste production tokens into online JWT decoders.
 MCP_PUBLIC_URL=http://localhost:3000/mcp
 OAUTH_ISSUER=https://<tenant>.forgeblocks.com:443/am/oauth2/realms/root/realms/<realm>
 OAUTH_REQUIRED_SCOPES=fhir-mcp:read
+OAUTH_CLIENT_MODE=public
+OAUTH_ALLOWED_CLIENT_IDS=fhir-mcp-public
 ```
 
 Then run through [test-plan.md](test-plan.md), section B.
+
+## 8. CIMD clients
+
+With Client ID Metadata Documents (CIMD), an MCP client's ID is the HTTPS URL
+of a JSON document describing it, and nobody pre-registers it in AIC. AIC
+fetches the document during login and builds a temporary client from it plus
+a **CIMD profile**. Background and design: [cimd-plan.md](cimd-plan.md).
+
+AIC added CIMD in the 29 Sep 2026 release ([Ping's CIMD
+page](https://docs.pingidentity.com/pingoneaic/am-oauth2/oauth2-cimd.html)).
+It does **not** advertise it in discovery yet (no
+`client_id_metadata_document_supported`), so MCP clients won't choose CIMD by
+themselves: give each one the document URL as its client ID.
+
+1. **Check the release is installed.** In the native console: Realms >
+   *realm* > Applications > OAuth 2.0 should have a **CIMD Profiles** tab.
+2. **Publish the documents.** Fill in and host the templates in
+   [`cimd/`](../cimd/README.md), then run the `curl` check there. Each must
+   be on public HTTPS (SSRF protection blocks loopback and private
+   addresses), return `200` without redirects, be at most 5 KB, and have a
+   `client_id` equal to its own URL.
+3. **Create a CIMD profile** (Add CIMD Profile), e.g. `fhir-mcp-cimd`:
+
+   | Setting | Value |
+   | --- | --- |
+   | CIMD Client ID URL Patterns | Where the documents are hosted, as narrowly as possible, e.g. `https://<host>/<path>/*`. Anyone who can publish a file under this prefix becomes a client |
+   | CIMD Metadata Override Deny List | `scope`, `grant_types`, `response_types`, `token_endpoint_auth_method`. Add `redirect_uri` to pin redirect URIs in the profile instead of trusting the document |
+   | CIMD SSRF Protection Enabled | `true` (the default) |
+
+   If no profile matches a client ID, or more than one does, AIC returns
+   `invalid_client`.
+4. **Set the profile's client defaults** (Core tab): **Scope(s)**
+   `fhir-mcp:read` only, authorization code grant only, token endpoint
+   authentication method `none`. With `scope` deny-listed, a document can't
+   ask for more.
+5. **PKCE.** On the OAuth2 Provider, make sure **Code Verifier Parameter
+   Required** covers public clients. CIMD clients using `none` are public.
+6. **Audience script.** No change: the script in step 3 keys on the
+   requested `resource`, not on the client. Confirm it runs for CIMD clients
+   by decoding a token (below).
+7. **Consent.** The consent page shows `client_name` from the document, which
+   anyone hosting under your pattern controls. Check it also shows the client
+   ID URL or its host.
+8. **Dynamic registration.** The realm advertises a `registration_endpoint`.
+   Unless something depends on it, turn off open dynamic client
+   registration, so clients can't register their way around the profile.
+9. **Check one token** (as in step 6) from a CIMD login and record
+   `client_id`, `azp`, `aud` and `scope`. The server takes the client from
+   `client_id`, falling back to `azp`, and needs it to be the document URL.
+
+Then configure the server and connect a client:
+
+```bash
+OAUTH_CLIENT_MODE=cimd
+OAUTH_CIMD_CLIENT_ID_PATTERNS=https://<host>/<path>/*   # same as the profile
+# and remove OAUTH_ALLOWED_CLIENT_IDS
+```
+
+```bash
+claude mcp add --transport http --client-id https://<host>/<path>/claude-code.json \
+  --callback-port 8765 bxhealth-fhir-cimd http://localhost:3000/mcp
+```
+
+For the MCP Inspector, put `https://<host>/<path>/mcp-inspector.json` in the
+client ID field. Then run [test-plan.md](test-plan.md), section D. After the
+cut-over, disable `fhir-mcp-public`, or at least reduce it to
+`fhir-mcp:read` and the redirect URIs still in use.

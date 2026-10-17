@@ -1,0 +1,9 @@
+{
+  "client_id": "https://CIMD_HOST/CIMD_PATH/claude-code.json",
+  "client_name": "Claude Code (bxhealth-fhir-mcp)",
+  "redirect_uris": ["http://localhost:8765/callback"],
+  "grant_types": ["authorization_code"],
+  "response_types": ["code"],
+  "token_endpoint_auth_method": "none",
+  "scope": "fhir-mcp:read"
+}

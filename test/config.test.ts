@@ -31,6 +31,7 @@ describe("transport and fail-closed rules", () => {
       jwksUri: undefined,
       algorithms: ["RS256", "ES256"],
       clockSkewSeconds: 30,
+      clientPolicy: { mode: "public", allowedClientIds: [] },
     });
   });
 
@@ -42,6 +43,57 @@ describe("transport and fail-closed rules", () => {
 
   test("the issuer is kept exactly as given, including :443", () => {
     assert.equal(parseConfig(http).oauth?.issuer, http.OAUTH_ISSUER);
+  });
+});
+
+describe("client mode", () => {
+  const PATTERN = "https://cimd.example.com/clients/*";
+
+  test("public mode takes a list of client IDs", () => {
+    const { oauth } = parseConfig({ ...http, OAUTH_ALLOWED_CLIENT_IDS: "fhir-mcp-public, other" });
+    assert.deepEqual(oauth?.clientPolicy, { mode: "public", allowedClientIds: ["fhir-mcp-public", "other"] });
+  });
+
+  test("public mode refuses URL client IDs and CIMD patterns", () => {
+    assert.throws(
+      () => parseConfig({ ...http, OAUTH_ALLOWED_CLIENT_IDS: "https://cimd.example.com/c.json" }),
+      /OAUTH_ALLOWED_CLIENT_IDS: .* is a URL/
+    );
+    assert.throws(
+      () => parseConfig({ ...http, OAUTH_CIMD_CLIENT_ID_PATTERNS: PATTERN }),
+      /OAUTH_CIMD_CLIENT_ID_PATTERNS: is only used when OAUTH_CLIENT_MODE=cimd/
+    );
+  });
+
+  test("cimd mode takes URL patterns", () => {
+    const { oauth } = parseConfig({ ...http, OAUTH_CLIENT_MODE: "cimd", OAUTH_CIMD_CLIENT_ID_PATTERNS: PATTERN });
+    assert.deepEqual(oauth?.clientPolicy, { mode: "cimd", patterns: [PATTERN] });
+  });
+
+  test("cimd mode refuses to start without patterns, or with public client IDs", () => {
+    assert.throws(
+      () => parseConfig({ ...http, OAUTH_CLIENT_MODE: "cimd" }),
+      /OAUTH_CIMD_CLIENT_ID_PATTERNS: is required when OAUTH_CLIENT_MODE=cimd/
+    );
+    assert.throws(
+      () => parseConfig({ ...http, OAUTH_CLIENT_MODE: "cimd", OAUTH_CIMD_CLIENT_ID_PATTERNS: PATTERN, OAUTH_ALLOWED_CLIENT_IDS: "x" }),
+      /OAUTH_ALLOWED_CLIENT_IDS: is only used when OAUTH_CLIENT_MODE=public/
+    );
+  });
+
+  test("cimd mode reports each unusable pattern", () => {
+    assert.throws(
+      () => parseConfig({ ...http, OAUTH_CLIENT_MODE: "cimd", OAUTH_CIMD_CLIENT_ID_PATTERNS: "http://a.example/*,https://*.example/x" }),
+      /"http:\/\/a.example\/\*" must use https[\s\S]*wildcard host/
+    );
+  });
+
+  test("an unknown mode is refused", () => {
+    assert.throws(() => parseConfig({ ...http, OAUTH_CLIENT_MODE: "dcr" }), /OAUTH_CLIENT_MODE/);
+  });
+
+  test("client mode settings are ignored for stdio", () => {
+    assert.doesNotThrow(() => parseConfig({ ...base, OAUTH_CLIENT_MODE: "cimd" }));
   });
 });
 
