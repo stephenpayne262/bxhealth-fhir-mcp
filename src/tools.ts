@@ -19,6 +19,12 @@ import {
 export interface ToolDefinition {
   name: string;
   description: string;
+  /**
+   * True only if the tool cannot change data on the FHIR server. With
+   * MCP_READ_ONLY=true (the default) tools with false are neither listed nor
+   * callable. Reported to clients as the MCP `readOnlyHint` annotation.
+   */
+  readOnly: boolean;
   inputSchema: z.ZodTypeAny;
   handler: (input: unknown) => Promise<string>;
 }
@@ -31,6 +37,7 @@ export interface ToolDefinition {
 function defineTool<S extends z.ZodTypeAny>(tool: {
   name: string;
   description: string;
+  readOnly: boolean;
   inputSchema: S;
   handler: (input: z.infer<S>) => Promise<string>;
 }): ToolDefinition {
@@ -66,6 +73,7 @@ export const tools: ToolDefinition[] = [
   // ── Capability Statement ──────────────────────────────────────────────────
   defineTool({
     name: "fhir_get_metadata",
+    readOnly: true,
     description:
       "Retrieve the FHIR server capability statement (TerminologyCapabilities / CapabilityStatement). " +
       "Describes supported resources, operations, search parameters, and server features.",
@@ -79,6 +87,7 @@ export const tools: ToolDefinition[] = [
   // ── Read ──────────────────────────────────────────────────────────────────
   defineTool({
     name: "fhir_read_resource",
+    readOnly: true,
     description:
       "Read a single FHIR R4 resource by its resource type and logical ID. " +
       "Returns the current version of the resource.",
@@ -96,6 +105,7 @@ export const tools: ToolDefinition[] = [
   // ── Version Read ──────────────────────────────────────────────────────────
   defineTool({
     name: "fhir_vread_resource",
+    readOnly: true,
     description:
       "Read a specific historical version of a FHIR R4 resource by type, logical ID, and version ID.",
     inputSchema: z.object({
@@ -113,6 +123,7 @@ export const tools: ToolDefinition[] = [
   // ── Search ────────────────────────────────────────────────────────────────
   defineTool({
     name: "fhir_search_resources",
+    readOnly: true,
     description:
       "Search for FHIR R4 resources of a given type using standard FHIR search parameters. " +
       "Supports all FHIR search modifiers, chaining, and result controls (_count, _sort, _include, etc.).",
@@ -176,6 +187,7 @@ export const tools: ToolDefinition[] = [
   // ── Create ────────────────────────────────────────────────────────────────
   defineTool({
     name: "fhir_create_resource",
+    readOnly: false,
     description:
       "Create a new FHIR R4 resource on the server. The server assigns the logical ID. " +
       "Returns the created resource with server-assigned id and meta.",
@@ -195,6 +207,7 @@ export const tools: ToolDefinition[] = [
   // ── Update ────────────────────────────────────────────────────────────────
   defineTool({
     name: "fhir_update_resource",
+    readOnly: false,
     description:
       "Update (replace) an existing FHIR R4 resource using a full resource representation. " +
       "The resource body must include the same id as the path parameter.",
@@ -215,6 +228,7 @@ export const tools: ToolDefinition[] = [
   // ── Patch ─────────────────────────────────────────────────────────────────
   defineTool({
     name: "fhir_patch_resource",
+    readOnly: false,
     description:
       "Partially update a FHIR R4 resource using JSON Patch (RFC 6902) or a FHIR Parameters patch. " +
       "JSON Patch is the default; pass patchType='fhir-patch' for a FHIR patch.",
@@ -243,6 +257,7 @@ export const tools: ToolDefinition[] = [
   // ── Delete ────────────────────────────────────────────────────────────────
   defineTool({
     name: "fhir_delete_resource",
+    readOnly: false,
     description: "Delete a FHIR R4 resource by type and logical ID.",
     inputSchema: z.object({
       resourceType: ResourceTypeSchema,
@@ -260,6 +275,7 @@ export const tools: ToolDefinition[] = [
   // ── Resource History ──────────────────────────────────────────────────────
   defineTool({
     name: "fhir_resource_history",
+    readOnly: true,
     description:
       "Retrieve the version history for a specific FHIR R4 resource instance.",
     inputSchema: z.object({
@@ -286,6 +302,7 @@ export const tools: ToolDefinition[] = [
   // ── Type History ──────────────────────────────────────────────────────────
   defineTool({
     name: "fhir_type_history",
+    readOnly: true,
     description:
       "Retrieve the change history for all resources of a given FHIR R4 type.",
     inputSchema: z.object({
@@ -311,6 +328,7 @@ export const tools: ToolDefinition[] = [
   // ── $everything ───────────────────────────────────────────────────────────
   defineTool({
     name: "fhir_patient_everything",
+    readOnly: true,
     description:
       "Invoke the FHIR $everything operation on a Patient to retrieve all resources " +
       "in the patient compartment (encounters, observations, conditions, medications, etc.).",
@@ -350,6 +368,8 @@ export const tools: ToolDefinition[] = [
   // ── $validate ─────────────────────────────────────────────────────────────
   defineTool({
     name: "fhir_validate_resource",
+    // POSTs the resource, but $validate never stores or changes anything.
+    readOnly: true,
     description:
       "Invoke the FHIR $validate operation to validate a resource against the base FHIR R4 " +
       "specification or an optional StructureDefinition profile URL.",
@@ -371,6 +391,8 @@ export const tools: ToolDefinition[] = [
   // ── Generic Operation ─────────────────────────────────────────────────────
   defineTool({
     name: "fhir_execute_operation",
+    // Can invoke any operation, including ones that modify data.
+    readOnly: false,
     description:
       "Invoke a named FHIR operation (e.g. $expand, $lookup, $translate, $validate-code, $closure, " +
       "$everything, $match, $apply, $process-message). Supports system, type, and instance level operations.",
@@ -403,6 +425,7 @@ export const tools: ToolDefinition[] = [
   // ── Transaction / Batch ───────────────────────────────────────────────────
   defineTool({
     name: "fhir_transaction",
+    readOnly: false,
     description:
       "Submit a FHIR Bundle of type 'transaction' or 'batch' to the server. " +
       "Transactions are atomic; batches process each entry independently.",
@@ -424,6 +447,7 @@ export const tools: ToolDefinition[] = [
   // ── Convenience: Patient search ───────────────────────────────────────────
   defineTool({
     name: "fhir_search_patients",
+    readOnly: true,
     description:
       "Convenience tool to search for Patient resources using common demographic parameters.",
     inputSchema: z.object({
@@ -467,6 +491,7 @@ export const tools: ToolDefinition[] = [
   // ── Convenience: Observation search ──────────────────────────────────────
   defineTool({
     name: "fhir_search_observations",
+    readOnly: true,
     description:
       "Convenience tool to search for Observation resources (lab results, vitals, etc.).",
     inputSchema: z.object({
@@ -519,6 +544,7 @@ export const tools: ToolDefinition[] = [
   // ── Convenience: Conditions search ───────────────────────────────────────
   defineTool({
     name: "fhir_search_conditions",
+    readOnly: true,
     description:
       "Convenience tool to search for Condition (problem/diagnosis) resources.",
     inputSchema: z.object({
@@ -562,6 +588,7 @@ export const tools: ToolDefinition[] = [
   // ── Convenience: MedicationRequest search ────────────────────────────────
   defineTool({
     name: "fhir_search_medication_requests",
+    readOnly: true,
     description:
       "Convenience tool to search for MedicationRequest (prescription/order) resources.",
     inputSchema: z.object({
@@ -618,6 +645,7 @@ export const tools: ToolDefinition[] = [
   // ── Convenience: Encounter search ────────────────────────────────────────
   defineTool({
     name: "fhir_search_encounters",
+    readOnly: true,
     description:
       "Convenience tool to search for Encounter resources (visits, admissions, etc.).",
     inputSchema: z.object({

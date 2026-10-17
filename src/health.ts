@@ -1,6 +1,7 @@
 import type { Request, Response } from "express";
 import { config } from "./config.js";
 import { getCapabilityStatement } from "./fhir-client.js";
+import type { OAuthStatus } from "./oauth/verifier.js";
 import { SERVER_NAME, SERVER_VERSION } from "./server.js";
 
 /**
@@ -17,19 +18,30 @@ export function healthz(_req: Request, res: Response): void {
 }
 
 /**
- * Readiness. Pings the FHIR server's CapabilityStatement, so a pod that
+ * Readiness. In HTTP mode, first requires the OAuth issuer metadata and JWKS
+ * location to have been resolved. Then pings the FHIR server's CapabilityStatement, so a pod that
  * cannot reach FHIR is pulled out of the Service rather than serving tool
  * calls that are all going to fail.
  *
  * Also reports the fhirVersion the server actually advertises, which is the
  * cheapest way to catch an R4-server/R5-server mismatch.
  */
-export async function readyz(_req: Request, res: Response): Promise<void> {
+export function readyzHandler(oauthStatus?: () => OAuthStatus) {
+  return (req: Request, res: Response) => readyz(req, res, oauthStatus?.());
+}
+
+async function readyz(_req: Request, res: Response, oauth?: OAuthStatus): Promise<void> {
+  // Without issuer metadata no token can be validated, so nothing would work.
+  if (oauth && oauth.state !== "ready") {
+    res.status(503).json({ status: "not-ready", reason: "oauth-not-ready", oauth });
+    return;
+  }
   try {
     const capability = (await getCapabilityStatement()) as { fhirVersion?: string };
     const reported = capability?.fhirVersion;
     res.status(200).json({
       status: "ready",
+      ...(oauth ? { oauth } : {}),
       fhir: {
         baseUrl: config.fhir.baseUrl,
         expectedVersion: config.fhir.version,

@@ -47,8 +47,7 @@ async function fhirRequest<T = unknown>(options: FhirRequestOptions): Promise<T>
     const authHeaders: Record<string, string> = {};
     if (!options.skipAuth) {
       const token = await getAccessToken();
-      // Only attach Authorization header if a token was successfully obtained.
-      // If null, proceed without auth (FHIR server may allow unauthenticated access).
+      // null means FHIR_AUTH=none; a failure to get a token throws instead.
       if (token) {
         authHeaders.Authorization = `Bearer ${token}`;
       }
@@ -72,7 +71,12 @@ async function fhirRequest<T = unknown>(options: FhirRequestOptions): Promise<T>
   } catch (error: unknown) {
     // A 401 with a cached token usually means it was revoked or the signing
     // keys rotated. Drop the cache and retry once with a fresh token.
-    if (!options.skipAuth && axios.isAxiosError(error) && error.response?.status === 401) {
+    if (
+      !options.skipAuth &&
+      config.fhir.auth.mode !== "none" &&
+      axios.isAxiosError(error) &&
+      error.response?.status === 401
+    ) {
       clearTokenCache();
       try {
         return await send();

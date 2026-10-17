@@ -1,9 +1,18 @@
 import { randomUUID } from "node:crypto";
 import express, { type Request, type Response } from "express";
+import { requireBearerAuth } from "@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js";
+import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import { config } from "./config.js";
-import { healthz, readyz } from "./health.js";
+import { healthz, readyzHandler } from "./health.js";
+import {
+  protectedResourceMetadataHandler,
+  protectedResourceMetadataPath,
+  protectedResourceMetadataUrl,
+} from "./oauth/metadata.js";
+import { JwtTokenVerifier } from "./oauth/verifier.js";
+import { originGuard } from "./origin.js";
 import { createServer } from "./server.js";
 
 /**
@@ -15,22 +24,40 @@ import { createServer } from "./server.js";
  * without sticky sessions produces intermittent "session not found" errors,
  * because a follow-up request can land on a pod that never saw the
  * initialize. See the deployment notes before changing replicas.
+ *
+ * Every /mcp request (POST, GET and DELETE) must carry a valid OAuth access
+ * token; there is no unauthenticated mode. A session is bound to the
+ * identity that opened it, so a session id alone is never a credential: the
+ * MCP spec forbids using sessions for authentication.
  */
 
 interface Session {
   transport: StreamableHTTPServerTransport;
   lastSeen: number;
+  /** Identity (issuer, subject, client) of the token that opened the session. */
+  owner: string;
 }
 
 const sessions = new Map<string, Session>();
 
+function ownerOf(auth: AuthInfo | undefined): string {
+  const extra = auth?.extra ?? {};
+  return JSON.stringify([extra.iss, extra.sub, auth?.clientId]);
+}
+
 /**
- * Looks up a session and marks it active. Clients that vanish without a
- * DELETE would otherwise stay in the map for the life of the pod.
+ * Looks up a session owned by the caller and marks it active. Clients that
+ * vanish without a DELETE would otherwise stay in the map for the life of the
+ * pod. A session owned by someone else is reported exactly like a missing
+ * one, so a leaked id reveals nothing.
  */
-function touchSession(id: string): StreamableHTTPServerTransport | undefined {
+function touchSession(id: string, auth: AuthInfo | undefined): StreamableHTTPServerTransport | undefined {
   const session = sessions.get(id);
   if (!session) return undefined;
+  if (session.owner !== ownerOf(auth)) {
+    console.error(`[http] session ${id} used by a different identity than opened it; rejected`);
+    return undefined;
+  }
   session.lastSeen = Date.now();
   return session.transport;
 }
@@ -51,13 +78,49 @@ function sessionIdOf(req: Request): string | undefined {
   return Array.isArray(header) ? header[0] : header;
 }
 
-export function buildApp(): express.Express {
+export interface AppOptions {
+  /** Injectable for tests; defaults to a verifier for the configured issuer. */
+  verifier?: JwtTokenVerifier;
+}
+
+export function buildApp(options: AppOptions = {}): express.Express {
+  const { oauth } = config;
+  const publicUrl = config.server.publicUrl;
+  // config.ts guarantees both for the http transport; this guards misuse.
+  if (!oauth || !publicUrl) {
+    throw new Error("The HTTP transport requires OAuth configuration (OAUTH_ISSUER, MCP_PUBLIC_URL).");
+  }
+  const verifier = options.verifier ?? new JwtTokenVerifier(oauth);
+  void verifier.init().catch(() => undefined); // warm up; failures are logged and retried
+
   const app = express();
+  app.disable("x-powered-by");
 
   // Health endpoints are registered before the JSON body parser and carry no
   // auth: kubelet probes must not depend on either.
   app.get("/healthz", healthz);
-  app.get("/readyz", readyz);
+  app.get("/readyz", readyzHandler(() => verifier.getStatus()));
+
+  // Protected Resource Metadata is public: it is how an unauthenticated
+  // client learns where to log in. Served at the RFC 9728 path for /mcp and
+  // at the root form for clients that only try that.
+  const metadata = protectedResourceMetadataHandler(publicUrl, oauth);
+  const metadataCors = originGuard(config.server.allowedOrigins, { reject: false });
+  const metadataPaths = [...new Set([protectedResourceMetadataPath(publicUrl), "/.well-known/oauth-protected-resource"])];
+  for (const path of metadataPaths) {
+    app.options(path, metadataCors);
+    app.get(path, metadataCors, metadata);
+  }
+
+  app.use("/mcp", originGuard(config.server.allowedOrigins, { reject: true }));
+  app.use(
+    "/mcp",
+    requireBearerAuth({
+      verifier,
+      requiredScopes: oauth.requiredScopes,
+      resourceMetadataUrl: protectedResourceMetadataUrl(publicUrl),
+    })
+  );
 
   app.use(express.json({ limit: "4mb" }));
 
@@ -66,7 +129,7 @@ export function buildApp(): express.Express {
     const sessionId = sessionIdOf(req);
 
     if (sessionId) {
-      const existing = touchSession(sessionId);
+      const existing = touchSession(sessionId, req.auth);
       if (!existing) {
         res.status(404).json(rpcError(-32001, "Session not found", req.body?.id));
         return;
@@ -93,7 +156,7 @@ export function buildApp(): express.Express {
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: () => randomUUID(),
       onsessioninitialized: (id) => {
-        sessions.set(id, { transport, lastSeen: Date.now() });
+        sessions.set(id, { transport, lastSeen: Date.now(), owner: ownerOf(req.auth) });
         console.error(`[http] session opened: ${id} (${sessions.size} open)`);
       },
       onsessionclosed: (id) => {
@@ -133,7 +196,7 @@ function requireSession(req: Request, res: Response): StreamableHTTPServerTransp
     res.status(400).json(rpcError(-32000, "Bad Request: Mcp-Session-Id header is required"));
     return null;
   }
-  const transport = touchSession(sessionId);
+  const transport = touchSession(sessionId, req.auth);
   if (!transport) {
     res.status(404).json(rpcError(-32001, "Session not found"));
     return null;
@@ -152,6 +215,7 @@ export function startHttpServer(): void {
   const httpServer = app.listen(port, host, () => {
     console.error(`[http] MCP server listening on http://${host}:${port}/mcp`);
     console.error(`[http] FHIR ${config.fhir.version} base: ${config.fhir.baseUrl}`);
+    console.error(`[http] OAuth resource ${config.server.publicUrl}, issuer ${config.oauth?.issuer}`);
   });
 
   // Sweep at a fraction of the idle timeout; unref so it never holds the

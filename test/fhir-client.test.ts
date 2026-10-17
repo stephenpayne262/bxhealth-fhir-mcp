@@ -39,6 +39,7 @@ before(async () => {
   const { port } = server.address() as AddressInfo;
 
   // config.ts reads these at import time, so set them before loading src/.
+  process.env.FHIR_AUTH = "client_credentials";
   process.env.PINGONE_ENV_ID = "test-env";
   process.env.PINGONE_CLIENT_ID = "test-client";
   process.env.PINGONE_CLIENT_SECRET = "test-secret";

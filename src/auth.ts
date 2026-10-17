@@ -1,6 +1,14 @@
 import axios from "axios";
 import { config } from "./config.js";
 
+/**
+ * Outbound credentials for calls from this server to FHIR (FHIR_AUTH).
+ *
+ * This is the server's own identity, not the MCP caller's: the caller's
+ * token is never forwarded to FHIR (the MCP spec forbids token passthrough).
+ * Delegated access is a later phase, via token exchange.
+ */
+
 interface TokenResponse {
   access_token: string;
   token_type: string;
@@ -15,22 +23,22 @@ interface CachedToken {
 
 let cachedToken: CachedToken | null = null;
 // Shared by concurrent callers so a cold or expiring cache triggers one
-// PingOne request, not one per in-flight tool call.
-let pendingToken: Promise<string | null> | null = null;
+// token request, not one per in-flight tool call.
+let pendingToken: Promise<string> | null = null;
 
 /**
- * Retrieves a valid access token using PingOne client_credentials flow
- * with client_secret_basic authentication (credentials in Authorization header).
- * Caches the token and refreshes it 30 seconds before expiry.
+ * Returns the bearer token to send to FHIR, or null when FHIR_AUTH=none.
  *
- * Returns null if the token cannot be obtained (e.g. PingOne app not configured
- * with client_credentials grant or missing scopes). In that case callers should
- * attempt the FHIR request without an Authorization header.
+ * With FHIR_AUTH=client_credentials, uses PingOne client_credentials with
+ * client_secret_basic, caches the token, and refreshes it 30 seconds before
+ * expiry. If no token can be obtained this throws: a misconfigured or
+ * unavailable authorization server must fail the call, not silently send
+ * it unauthenticated.
  */
 export async function getAccessToken(): Promise<string | null> {
-  const now = Date.now();
+  if (config.fhir.auth.mode === "none") return null;
 
-  if (cachedToken && cachedToken.expiresAt > now + 30_000) {
+  if (cachedToken && cachedToken.expiresAt > Date.now() + 30_000) {
     return cachedToken.accessToken;
   }
 
@@ -42,42 +50,37 @@ export async function getAccessToken(): Promise<string | null> {
   return pendingToken;
 }
 
-async function fetchAccessToken(): Promise<string | null> {
-  const now = Date.now();
-  const { clientId, clientSecret, tokenUrl } = config.pingone;
+async function fetchAccessToken(): Promise<string> {
+  const auth = config.fhir.auth;
+  if (auth.mode !== "client_credentials") throw new Error("FHIR_AUTH is not client_credentials");
 
+  const now = Date.now();
   // PingOne requires client_secret_basic: credentials go in the Authorization header,
   // not in the POST body (client_secret_post is not supported for this app).
-  const basicCredentials = Buffer.from(`${clientId}:${clientSecret}`).toString("base64");
+  const basicCredentials = Buffer.from(`${auth.clientId}:${auth.clientSecret}`).toString("base64");
 
   try {
     const response = await axios.post<TokenResponse>(
-      tokenUrl,
+      auth.tokenUrl,
       "grant_type=client_credentials",
       {
         headers: {
           "Content-Type": "application/x-www-form-urlencoded",
           Authorization: `Basic ${basicCredentials}`,
         },
+        timeout: 10_000,
       }
     );
 
     const { access_token, expires_in } = response.data;
-
-    cachedToken = {
-      accessToken: access_token,
-      expiresAt: now + expires_in * 1000,
-    };
-
+    cachedToken = { accessToken: access_token, expiresAt: now + expires_in * 1000 };
     return access_token;
   } catch (err: unknown) {
-    // Log the auth failure but allow callers to proceed without a token.
-    // This supports FHIR servers that permit unauthenticated access.
     const detail = axios.isAxiosError(err)
       ? JSON.stringify(err.response?.data ?? err.message)
       : String(err);
-    console.error(`[auth] Failed to obtain access token (will proceed without auth): ${detail}`);
-    return null;
+    console.error(`[fhir-auth] Failed to obtain FHIR access token: ${detail}`);
+    throw new Error("Could not obtain an access token for the FHIR server.");
   }
 }
 

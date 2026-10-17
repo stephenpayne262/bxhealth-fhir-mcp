@@ -5,7 +5,9 @@ import {
   ListToolsRequestSchema,
   McpError,
 } from "@modelcontextprotocol/sdk/types.js";
-import { tools } from "./tools.js";
+import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
+import { config } from "./config.js";
+import { type ToolDefinition, tools } from "./tools.js";
 
 export const SERVER_NAME = "bxhealth-fhir-mcp";
 export const SERVER_VERSION = "1.0.0";
@@ -16,8 +18,11 @@ export const SERVER_VERSION = "1.0.0";
  * A Server instance can only be connected to one transport, and the
  * Streamable HTTP transport is per-session, so the HTTP entrypoint calls
  * this once per session rather than sharing a single module-level server.
+ *
+ * With MCP_READ_ONLY=true only tools marked readOnly are exposed; the others
+ * are absent from tools/list and rejected as unknown if called anyway.
  */
-export function createServer(): Server {
+export function createServer(available: ToolDefinition[] = availableTools()): Server {
   const server = new Server(
     { name: SERVER_NAME, version: SERVER_VERSION },
     { capabilities: { tools: {} } }
@@ -27,20 +32,21 @@ export function createServer(): Server {
 
   server.setRequestHandler(ListToolsRequestSchema, async () => {
     return {
-      tools: tools.map((tool) => ({
+      tools: available.map((tool) => ({
         name: tool.name,
         description: tool.description,
         inputSchema: zodSchemaToJsonSchema(tool.inputSchema),
+        annotations: { readOnlyHint: tool.readOnly },
       })),
     };
   });
 
   // ── Call Tool ───────────────────────────────────────────────────────────────
 
-  server.setRequestHandler(CallToolRequestSchema, async (request) => {
+  server.setRequestHandler(CallToolRequestSchema, async (request, extra) => {
     const { name, arguments: args } = request.params;
 
-    const tool = tools.find((t) => t.name === name);
+    const tool = available.find((t) => t.name === name);
     if (!tool) {
       throw new McpError(ErrorCode.MethodNotFound, `Unknown tool: ${name}`);
     }
@@ -54,12 +60,15 @@ export function createServer(): Server {
       );
     }
 
+    const started = Date.now();
     try {
       const result = await tool.handler(parseResult.data);
+      auditToolCall(extra.authInfo, name, "ok", started);
       return {
         content: [{ type: "text" as const, text: result }],
       };
     } catch (error: unknown) {
+      auditToolCall(extra.authInfo, name, "error", started);
       const message = error instanceof Error ? error.message : String(error);
       return {
         content: [{ type: "text" as const, text: `Error: ${message}` }],
@@ -69,6 +78,30 @@ export function createServer(): Server {
   });
 
   return server;
+}
+
+export function availableTools(): ToolDefinition[] {
+  return config.tools.readOnly ? tools.filter((t) => t.readOnly) : tools;
+}
+
+// ── Audit log ────────────────────────────────────────────────────────────────
+
+/**
+ * One JSON line per tool call on stderr: who called what, and how it went.
+ * Never the token, and never the arguments, which can carry patient data.
+ */
+function auditToolCall(auth: AuthInfo | undefined, tool: string, outcome: "ok" | "error", started: number): void {
+  console.error(
+    JSON.stringify({
+      event: "tool_call",
+      time: new Date().toISOString(),
+      sub: auth?.extra?.sub ?? null,
+      client_id: auth?.clientId ?? null,
+      tool,
+      outcome,
+      duration_ms: Date.now() - started,
+    })
+  );
 }
 
 // ── Zod → JSON Schema (simple conversion for MCP) ────────────────────────────

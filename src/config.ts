@@ -1,5 +1,6 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { parseConfig } from "./config-schema.js";
 
 // Load .env from the project root (one level up from src/ or dist/) into
 // process.env, without pulling in a dependency. Values already present in the
@@ -32,54 +33,4 @@ function loadDotEnv(): void {
 
 loadDotEnv();
 
-function required(name: string): string {
-  const value = process.env[name];
-  if (!value) {
-    throw new Error(
-      `Missing required environment variable ${name}. ` +
-        `Copy .env.example to .env and fill in the values.`
-    );
-  }
-  return value;
-}
-
-const pingoneEnvironmentId = required("PINGONE_ENV_ID");
-
-function optionalNumber(name: string, fallback: number): number {
-  const raw = process.env[name];
-  if (!raw) return fallback;
-  const parsed = Number(raw);
-  if (!Number.isInteger(parsed) || parsed <= 0) {
-    throw new Error(`Environment variable ${name} must be a positive integer, got "${raw}".`);
-  }
-  return parsed;
-}
-
-// stdio keeps the original MCP-host registration working (see mcp.json);
-// http is what runs in the cluster behind PingGateway.
-const transport = process.env.MCP_TRANSPORT ?? "stdio";
-if (transport !== "stdio" && transport !== "http") {
-  throw new Error(`MCP_TRANSPORT must be "stdio" or "http", got "${transport}".`);
-}
-
-export const config = {
-  server: {
-    transport,
-    port: optionalNumber("PORT", 3000),
-    host: process.env.HOST ?? "0.0.0.0",
-    // http transport only: sessions idle this long are closed, and new
-    // initialize requests are refused once this many are open.
-    sessionIdleMinutes: optionalNumber("MCP_SESSION_IDLE_MINUTES", 30),
-    maxSessions: optionalNumber("MCP_MAX_SESSIONS", 100),
-  },
-  pingone: {
-    environmentId: pingoneEnvironmentId,
-    clientId: required("PINGONE_CLIENT_ID"),
-    clientSecret: required("PINGONE_CLIENT_SECRET"),
-    tokenUrl: `https://auth.pingone.com/${pingoneEnvironmentId}/as/token`,
-  },
-  fhir: {
-    baseUrl: required("FHIR_BASE_URL"),
-    version: "R4" as const,
-  },
-};
+export const config = parseConfig(process.env);
