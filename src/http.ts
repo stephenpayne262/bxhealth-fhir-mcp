@@ -17,7 +17,34 @@ import { createServer } from "./server.js";
  * initialize. See the deployment notes before changing replicas.
  */
 
-const sessions = new Map<string, StreamableHTTPServerTransport>();
+interface Session {
+  transport: StreamableHTTPServerTransport;
+  lastSeen: number;
+}
+
+const sessions = new Map<string, Session>();
+
+/**
+ * Looks up a session and marks it active. Clients that vanish without a
+ * DELETE would otherwise stay in the map for the life of the pod.
+ */
+function touchSession(id: string): StreamableHTTPServerTransport | undefined {
+  const session = sessions.get(id);
+  if (!session) return undefined;
+  session.lastSeen = Date.now();
+  return session.transport;
+}
+
+function sweepIdleSessions(): void {
+  const cutoff = Date.now() - config.server.sessionIdleMinutes * 60_000;
+  for (const [id, session] of sessions) {
+    if (session.lastSeen < cutoff) {
+      sessions.delete(id);
+      void session.transport.close();
+      console.error(`[http] session expired (idle): ${id} (${sessions.size} open)`);
+    }
+  }
+}
 
 function sessionIdOf(req: Request): string | undefined {
   const header = req.headers["mcp-session-id"];
@@ -39,7 +66,7 @@ export function buildApp(): express.Express {
     const sessionId = sessionIdOf(req);
 
     if (sessionId) {
-      const existing = sessions.get(sessionId);
+      const existing = touchSession(sessionId);
       if (!existing) {
         res.status(404).json(rpcError(-32001, "Session not found", req.body?.id));
         return;
@@ -56,10 +83,17 @@ export function buildApp(): express.Express {
       return;
     }
 
+    if (sessions.size >= config.server.maxSessions) {
+      res
+        .status(503)
+        .json(rpcError(-32000, "Too many open sessions; try again later", (req.body as { id?: unknown }).id));
+      return;
+    }
+
     const transport = new StreamableHTTPServerTransport({
       sessionIdGenerator: () => randomUUID(),
       onsessioninitialized: (id) => {
-        sessions.set(id, transport);
+        sessions.set(id, { transport, lastSeen: Date.now() });
         console.error(`[http] session opened: ${id} (${sessions.size} open)`);
       },
       onsessionclosed: (id) => {
@@ -99,7 +133,7 @@ function requireSession(req: Request, res: Response): StreamableHTTPServerTransp
     res.status(400).json(rpcError(-32000, "Bad Request: Mcp-Session-Id header is required"));
     return null;
   }
-  const transport = sessions.get(sessionId);
+  const transport = touchSession(sessionId);
   if (!transport) {
     res.status(404).json(rpcError(-32001, "Session not found"));
     return null;
@@ -120,13 +154,20 @@ export function startHttpServer(): void {
     console.error(`[http] FHIR ${config.fhir.version} base: ${config.fhir.baseUrl}`);
   });
 
+  // Sweep at a fraction of the idle timeout; unref so it never holds the
+  // process open on shutdown.
+  const sweepMs = Math.max(60_000, (config.server.sessionIdleMinutes * 60_000) / 4);
+  const sweeper = setInterval(sweepIdleSessions, sweepMs);
+  sweeper.unref();
+
   // SSE streams are long-lived; do not let Node time them out mid-stream.
   httpServer.headersTimeout = 0;
   httpServer.requestTimeout = 0;
 
   const shutdown = (signal: string) => {
     console.error(`[http] ${signal} received, closing ${sessions.size} session(s)`);
-    for (const transport of sessions.values()) void transport.close();
+    clearInterval(sweeper);
+    for (const { transport } of sessions.values()) void transport.close();
     sessions.clear();
     httpServer.close(() => process.exit(0));
   };

@@ -14,6 +14,9 @@ interface CachedToken {
 }
 
 let cachedToken: CachedToken | null = null;
+// Shared by concurrent callers so a cold or expiring cache triggers one
+// PingOne request, not one per in-flight tool call.
+let pendingToken: Promise<string | null> | null = null;
 
 /**
  * Retrieves a valid access token using PingOne client_credentials flow
@@ -31,6 +34,16 @@ export async function getAccessToken(): Promise<string | null> {
     return cachedToken.accessToken;
   }
 
+  if (!pendingToken) {
+    pendingToken = fetchAccessToken().finally(() => {
+      pendingToken = null;
+    });
+  }
+  return pendingToken;
+}
+
+async function fetchAccessToken(): Promise<string | null> {
+  const now = Date.now();
   const { clientId, clientSecret, tokenUrl } = config.pingone;
 
   // PingOne requires client_secret_basic: credentials go in the Authorization header,

@@ -1,4 +1,4 @@
-import axios, { AxiosInstance, AxiosResponse } from "axios";
+import axios from "axios";
 import { config } from "./config.js";
 import { getAccessToken, clearTokenCache } from "./auth.js";
 
@@ -26,48 +26,99 @@ export interface FhirSearchParams {
   elements?: string[];
 }
 
-function buildAxiosInstance(): AxiosInstance {
-  return axios.create({
-    baseURL: config.fhir.baseUrl,
-    headers: {
-      Accept: "application/fhir+json",
-      "Content-Type": "application/fhir+json",
-      Prefer: "return=representation",
-    },
-    timeout: 30_000,
-  });
-}
+// Built once so keep-alive connections are reused across requests.
+//
+// paramsSerializer `indexes: null` makes axios send array values as repeated
+// keys (`date=ge2020&date=le2021`), which is what FHIR search expects. The
+// axios default (`date[]=...`) is silently ignored by FHIR servers.
+const client = axios.create({
+  baseURL: config.fhir.baseUrl,
+  headers: {
+    Accept: "application/fhir+json",
+    "Content-Type": "application/fhir+json",
+    Prefer: "return=representation",
+  },
+  timeout: 30_000,
+  paramsSerializer: { indexes: null },
+});
 
 async function fhirRequest<T = unknown>(options: FhirRequestOptions): Promise<T> {
-  const client = buildAxiosInstance();
-
-  const authHeaders: Record<string, string> = {};
-  if (!options.skipAuth) {
-    const token = await getAccessToken();
-    // Only attach Authorization header if a token was successfully obtained.
-    // If null, proceed without auth (FHIR server may allow unauthenticated access).
-    if (token) {
-      authHeaders.Authorization = `Bearer ${token}`;
+  const send = async (): Promise<T> => {
+    const authHeaders: Record<string, string> = {};
+    if (!options.skipAuth) {
+      const token = await getAccessToken();
+      // Only attach Authorization header if a token was successfully obtained.
+      // If null, proceed without auth (FHIR server may allow unauthenticated access).
+      if (token) {
+        authHeaders.Authorization = `Bearer ${token}`;
+      }
     }
-  }
 
-  const requestConfig = {
-    method: options.method,
-    url: options.path,
-    headers: {
-      ...authHeaders,
-      ...options.headers,
-    },
-    params: options.params,
-    data: options.body,
+    const response = await client.request<T>({
+      method: options.method,
+      url: options.path,
+      headers: {
+        ...authHeaders,
+        ...options.headers,
+      },
+      params: options.params,
+      data: options.body,
+    });
+    return response.data;
   };
 
   try {
-    const response = await client.request<T>(requestConfig);
-    return response.data;
+    return await send();
   } catch (error: unknown) {
+    // A 401 with a cached token usually means it was revoked or the signing
+    // keys rotated. Drop the cache and retry once with a fresh token.
+    if (!options.skipAuth && axios.isAxiosError(error) && error.response?.status === 401) {
+      clearTokenCache();
+      try {
+        return await send();
+      } catch (retryError: unknown) {
+        throw formatFhirError(retryError);
+      }
+    }
     throw formatFhirError(error);
   }
+}
+
+// ── Path building ─────────────────────────────────────────────────────────────
+
+const RESOURCE_TYPE = /^[A-Z][A-Za-z]+$/;
+// FHIR R4 id datatype: https://hl7.org/fhir/R4/datatypes.html#id
+const FHIR_ID = /^[A-Za-z0-9\-.]{1,64}$/;
+const OPERATION_NAME = /^[A-Za-z][A-Za-z0-9\-_.]*$/;
+
+function resourceTypeSegment(resourceType: string): string {
+  if (!RESOURCE_TYPE.test(resourceType)) {
+    throw new Error(`Invalid FHIR resource type: "${resourceType}"`);
+  }
+  return resourceType;
+}
+
+function idSegment(id: string, label = "id"): string {
+  if (!FHIR_ID.test(id)) {
+    throw new Error(`Invalid FHIR ${label}: "${id}" (expected 1-64 of A-Z a-z 0-9 - .)`);
+  }
+  return encodeURIComponent(id);
+}
+
+function operationSegment(operation: string): string {
+  const name = operation.startsWith("$") ? operation.slice(1) : operation;
+  if (!OPERATION_NAME.test(name)) {
+    throw new Error(`Invalid FHIR operation name: "${operation}"`);
+  }
+  return `$${name}`;
+}
+
+/** Builds `/{resourceType}[/{id}[/_history/{versionId}]]` with every segment validated. */
+function resourcePath(resourceType: string, id?: string, versionId?: string): string {
+  let path = `/${resourceTypeSegment(resourceType)}`;
+  if (id !== undefined) path += `/${idSegment(id)}`;
+  if (versionId !== undefined) path += `/_history/${idSegment(versionId, "versionId")}`;
+  return path;
 }
 
 function formatFhirError(error: unknown): Error {
@@ -88,7 +139,7 @@ function formatFhirError(error: unknown): Error {
 // ── Resource CRUD ─────────────────────────────────────────────────────────────
 
 export async function readResource(resourceType: string, id: string): Promise<unknown> {
-  return fhirRequest({ method: "GET", path: `/${resourceType}/${id}` });
+  return fhirRequest({ method: "GET", path: resourcePath(resourceType, id) });
 }
 
 export async function vreadResource(
@@ -96,11 +147,11 @@ export async function vreadResource(
   id: string,
   versionId: string
 ): Promise<unknown> {
-  return fhirRequest({ method: "GET", path: `/${resourceType}/${id}/_history/${versionId}` });
+  return fhirRequest({ method: "GET", path: resourcePath(resourceType, id, versionId) });
 }
 
 export async function createResource(resourceType: string, body: unknown): Promise<unknown> {
-  return fhirRequest({ method: "POST", path: `/${resourceType}`, body });
+  return fhirRequest({ method: "POST", path: resourcePath(resourceType), body });
 }
 
 export async function updateResource(
@@ -108,7 +159,7 @@ export async function updateResource(
   id: string,
   body: unknown
 ): Promise<unknown> {
-  return fhirRequest({ method: "PUT", path: `/${resourceType}/${id}`, body });
+  return fhirRequest({ method: "PUT", path: resourcePath(resourceType, id), body });
 }
 
 export async function patchResource(
@@ -123,14 +174,14 @@ export async function patchResource(
       : "application/fhir+json";
   return fhirRequest({
     method: "PATCH",
-    path: `/${resourceType}/${id}`,
+    path: resourcePath(resourceType, id),
     body: patchBody,
     headers: { "Content-Type": contentType },
   });
 }
 
 export async function deleteResource(resourceType: string, id: string): Promise<unknown> {
-  return fhirRequest({ method: "DELETE", path: `/${resourceType}/${id}` });
+  return fhirRequest({ method: "DELETE", path: resourcePath(resourceType, id) });
 }
 
 // ── Search ────────────────────────────────────────────────────────────────────
@@ -148,24 +199,8 @@ export async function searchResource(opts: FhirSearchParams): Promise<unknown> {
 
   return fhirRequest({
     method: "GET",
-    path: `/${opts.resourceType}`,
+    path: resourcePath(opts.resourceType),
     params,
-  });
-}
-
-export async function searchPost(
-  resourceType: string,
-  searchParams: Record<string, string | string[]>
-): Promise<unknown> {
-  return fhirRequest({
-    method: "POST",
-    path: `/${resourceType}/_search`,
-    body: new URLSearchParams(
-      Object.entries(searchParams).flatMap(([k, v]) =>
-        Array.isArray(v) ? v.map((val): [string, string] => [k, val]) : [[k, v] as [string, string]]
-      )
-    ).toString(),
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
   });
 }
 
@@ -182,7 +217,7 @@ export async function getResourceHistory(
   if (since) params["_since"] = since;
   return fhirRequest({
     method: "GET",
-    path: `/${resourceType}/${id}/_history`,
+    path: `${resourcePath(resourceType, id)}/_history`,
     params,
   });
 }
@@ -195,7 +230,7 @@ export async function getTypeHistory(
   const params: Record<string, string> = {};
   if (count !== undefined) params["_count"] = String(count);
   if (since) params["_since"] = since;
-  return fhirRequest({ method: "GET", path: `/${resourceType}/_history`, params });
+  return fhirRequest({ method: "GET", path: `${resourcePath(resourceType)}/_history`, params });
 }
 
 // ── Operations ────────────────────────────────────────────────────────────────
@@ -211,10 +246,13 @@ export async function executeOperation(
   id?: string,
   body?: unknown
 ): Promise<unknown> {
-  const parts = [resourceType, id, `$${operation}`].filter(Boolean);
+  if (id !== undefined && resourceType === undefined) {
+    throw new Error("An instance-level operation needs resourceType as well as id.");
+  }
+  const base = resourceType !== undefined ? resourcePath(resourceType, id) : "";
   return fhirRequest({
     method: body !== undefined ? "POST" : "GET",
-    path: `/${parts.join("/")}`,
+    path: `${base}/${operationSegment(operation)}`,
     body,
   });
 }
@@ -229,7 +267,7 @@ export async function getPatientEverything(
 ): Promise<unknown> {
   return fhirRequest({
     method: "GET",
-    path: `/Patient/${patientId}/$everything`,
+    path: `${resourcePath("Patient", patientId)}/$everything`,
     params,
   });
 }
@@ -243,7 +281,7 @@ export async function validateResource(
   if (profile) params["profile"] = profile;
   return fhirRequest({
     method: "POST",
-    path: `/${resourceType}/$validate`,
+    path: `${resourcePath(resourceType)}/$validate`,
     body,
     params,
   });

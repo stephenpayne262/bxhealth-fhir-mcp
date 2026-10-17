@@ -67,6 +67,10 @@ export const config = {
     transport,
     port: optionalNumber("PORT", 3000),
     host: process.env.HOST ?? "0.0.0.0",
+    // http transport only: sessions idle this long are closed, and new
+    // initialize requests are refused once this many are open.
+    sessionIdleMinutes: optionalNumber("MCP_SESSION_IDLE_MINUTES", 30),
+    maxSessions: optionalNumber("MCP_MAX_SESSIONS", 100),
   },
   pingone: {
     environmentId: pingoneEnvironmentId,

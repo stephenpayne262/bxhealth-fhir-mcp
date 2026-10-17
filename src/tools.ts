@@ -23,6 +23,20 @@ export interface ToolDefinition {
   handler: (input: unknown) => Promise<string>;
 }
 
+/**
+ * Types a tool's handler from its Zod schema, so handler input can't drift
+ * from what server.ts validates. server.ts only calls the handler with the
+ * output of `inputSchema.safeParse`, which makes the cast below sound.
+ */
+function defineTool<S extends z.ZodTypeAny>(tool: {
+  name: string;
+  description: string;
+  inputSchema: S;
+  handler: (input: z.infer<S>) => Promise<string>;
+}): ToolDefinition {
+  return tool as ToolDefinition;
+}
+
 function jsonResult(data: unknown): string {
   return JSON.stringify(data, null, 2);
 }
@@ -50,7 +64,7 @@ const SearchParamsSchema = z
 
 export const tools: ToolDefinition[] = [
   // ── Capability Statement ──────────────────────────────────────────────────
-  {
+  defineTool({
     name: "fhir_get_metadata",
     description:
       "Retrieve the FHIR server capability statement (TerminologyCapabilities / CapabilityStatement). " +
@@ -60,10 +74,10 @@ export const tools: ToolDefinition[] = [
       const result = await getCapabilityStatement();
       return jsonResult(result);
     },
-  },
+  }),
 
   // ── Read ──────────────────────────────────────────────────────────────────
-  {
+  defineTool({
     name: "fhir_read_resource",
     description:
       "Read a single FHIR R4 resource by its resource type and logical ID. " +
@@ -73,14 +87,14 @@ export const tools: ToolDefinition[] = [
       id: z.string().describe("Logical ID of the resource"),
     }),
     async handler(input) {
-      const { resourceType, id } = input as { resourceType: string; id: string };
+      const { resourceType, id } = input;
       const result = await readResource(resourceType, id);
       return jsonResult(result);
     },
-  },
+  }),
 
   // ── Version Read ──────────────────────────────────────────────────────────
-  {
+  defineTool({
     name: "fhir_vread_resource",
     description:
       "Read a specific historical version of a FHIR R4 resource by type, logical ID, and version ID.",
@@ -90,18 +104,14 @@ export const tools: ToolDefinition[] = [
       versionId: z.string().describe("Version ID (from resource meta.versionId)"),
     }),
     async handler(input) {
-      const { resourceType, id, versionId } = input as {
-        resourceType: string;
-        id: string;
-        versionId: string;
-      };
+      const { resourceType, id, versionId } = input;
       const result = await vreadResource(resourceType, id, versionId);
       return jsonResult(result);
     },
-  },
+  }),
 
   // ── Search ────────────────────────────────────────────────────────────────
-  {
+  defineTool({
     name: "fhir_search_resources",
     description:
       "Search for FHIR R4 resources of a given type using standard FHIR search parameters. " +
@@ -147,18 +157,7 @@ export const tools: ToolDefinition[] = [
         .describe("Subset of elements to return (_elements). E.g. ['id', 'name', 'birthDate']"),
     }),
     async handler(input) {
-      const { resourceType, searchParams, count, offset, sort, includes, revIncludes, summary, elements } =
-        input as {
-          resourceType: string;
-          searchParams?: Record<string, string | string[]>;
-          count?: number;
-          offset?: number;
-          sort?: string;
-          includes?: string[];
-          revIncludes?: string[];
-          summary?: "true" | "text" | "data" | "count" | "false";
-          elements?: string[];
-        };
+      const { resourceType, searchParams, count, offset, sort, includes, revIncludes, summary, elements } = input;
       const result = await searchResource({
         resourceType,
         searchParams,
@@ -172,10 +171,10 @@ export const tools: ToolDefinition[] = [
       });
       return jsonResult(result);
     },
-  },
+  }),
 
   // ── Create ────────────────────────────────────────────────────────────────
-  {
+  defineTool({
     name: "fhir_create_resource",
     description:
       "Create a new FHIR R4 resource on the server. The server assigns the logical ID. " +
@@ -187,17 +186,14 @@ export const tools: ToolDefinition[] = [
         .describe("Full FHIR R4 resource object. Must include resourceType field."),
     }),
     async handler(input) {
-      const { resourceType, resource } = input as {
-        resourceType: string;
-        resource: Record<string, unknown>;
-      };
+      const { resourceType, resource } = input;
       const result = await createResource(resourceType, resource);
       return jsonResult(result);
     },
-  },
+  }),
 
   // ── Update ────────────────────────────────────────────────────────────────
-  {
+  defineTool({
     name: "fhir_update_resource",
     description:
       "Update (replace) an existing FHIR R4 resource using a full resource representation. " +
@@ -210,18 +206,14 @@ export const tools: ToolDefinition[] = [
         .describe("Complete FHIR R4 resource object to replace the existing one"),
     }),
     async handler(input) {
-      const { resourceType, id, resource } = input as {
-        resourceType: string;
-        id: string;
-        resource: Record<string, unknown>;
-      };
+      const { resourceType, id, resource } = input;
       const result = await updateResource(resourceType, id, resource);
       return jsonResult(result);
     },
-  },
+  }),
 
   // ── Patch ─────────────────────────────────────────────────────────────────
-  {
+  defineTool({
     name: "fhir_patch_resource",
     description:
       "Partially update a FHIR R4 resource using JSON Patch (RFC 6902) or a FHIR Parameters patch. " +
@@ -242,19 +234,14 @@ export const tools: ToolDefinition[] = [
         .describe("Patch format to use"),
     }),
     async handler(input) {
-      const { resourceType, id, patch, patchType } = input as {
-        resourceType: string;
-        id: string;
-        patch: unknown;
-        patchType?: "json-patch" | "fhir-patch";
-      };
+      const { resourceType, id, patch, patchType } = input;
       const result = await patchResource(resourceType, id, patch, patchType ?? "json-patch");
       return jsonResult(result);
     },
-  },
+  }),
 
   // ── Delete ────────────────────────────────────────────────────────────────
-  {
+  defineTool({
     name: "fhir_delete_resource",
     description: "Delete a FHIR R4 resource by type and logical ID.",
     inputSchema: z.object({
@@ -262,16 +249,16 @@ export const tools: ToolDefinition[] = [
       id: z.string().describe("Logical ID of the resource to delete"),
     }),
     async handler(input) {
-      const { resourceType, id } = input as { resourceType: string; id: string };
+      const { resourceType, id } = input;
       const result = await deleteResource(resourceType, id);
       return result
         ? jsonResult(result)
         : "Resource deleted successfully (204 No Content).";
     },
-  },
+  }),
 
   // ── Resource History ──────────────────────────────────────────────────────
-  {
+  defineTool({
     name: "fhir_resource_history",
     description:
       "Retrieve the version history for a specific FHIR R4 resource instance.",
@@ -290,19 +277,14 @@ export const tools: ToolDefinition[] = [
         .describe("Return history entries updated after this instant (ISO 8601)"),
     }),
     async handler(input) {
-      const { resourceType, id, count, since } = input as {
-        resourceType: string;
-        id: string;
-        count?: number;
-        since?: string;
-      };
+      const { resourceType, id, count, since } = input;
       const result = await getResourceHistory(resourceType, id, count, since);
       return jsonResult(result);
     },
-  },
+  }),
 
   // ── Type History ──────────────────────────────────────────────────────────
-  {
+  defineTool({
     name: "fhir_type_history",
     description:
       "Retrieve the change history for all resources of a given FHIR R4 type.",
@@ -320,18 +302,14 @@ export const tools: ToolDefinition[] = [
         .describe("Return history entries updated after this instant (ISO 8601)"),
     }),
     async handler(input) {
-      const { resourceType, count, since } = input as {
-        resourceType: string;
-        count?: number;
-        since?: string;
-      };
+      const { resourceType, count, since } = input;
       const result = await getTypeHistory(resourceType, count, since);
       return jsonResult(result);
     },
-  },
+  }),
 
   // ── $everything ───────────────────────────────────────────────────────────
-  {
+  defineTool({
     name: "fhir_patient_everything",
     description:
       "Invoke the FHIR $everything operation on a Patient to retrieve all resources " +
@@ -358,13 +336,7 @@ export const tools: ToolDefinition[] = [
         .describe("Page size for the response bundle"),
     }),
     async handler(input) {
-      const { patientId, start, end, types, count } = input as {
-        patientId: string;
-        start?: string;
-        end?: string;
-        types?: string[];
-        count?: number;
-      };
+      const { patientId, start, end, types, count } = input;
       const params: Record<string, string> = {};
       if (start) params["start"] = start;
       if (end) params["end"] = end;
@@ -373,10 +345,10 @@ export const tools: ToolDefinition[] = [
       const result = await getPatientEverything(patientId, params);
       return jsonResult(result);
     },
-  },
+  }),
 
   // ── $validate ─────────────────────────────────────────────────────────────
-  {
+  defineTool({
     name: "fhir_validate_resource",
     description:
       "Invoke the FHIR $validate operation to validate a resource against the base FHIR R4 " +
@@ -390,18 +362,14 @@ export const tools: ToolDefinition[] = [
         .describe("Canonical URL of a StructureDefinition profile to validate against"),
     }),
     async handler(input) {
-      const { resourceType, resource, profile } = input as {
-        resourceType: string;
-        resource: Record<string, unknown>;
-        profile?: string;
-      };
+      const { resourceType, resource, profile } = input;
       const result = await validateResource(resourceType, resource, profile);
       return jsonResult(result);
     },
-  },
+  }),
 
   // ── Generic Operation ─────────────────────────────────────────────────────
-  {
+  defineTool({
     name: "fhir_execute_operation",
     description:
       "Invoke a named FHIR operation (e.g. $expand, $lookup, $translate, $validate-code, $closure, " +
@@ -426,19 +394,14 @@ export const tools: ToolDefinition[] = [
         ),
     }),
     async handler(input) {
-      const { operation, resourceType, id, body } = input as {
-        operation: string;
-        resourceType?: string;
-        id?: string;
-        body?: unknown;
-      };
+      const { operation, resourceType, id, body } = input;
       const result = await executeOperation(operation, resourceType, id, body);
       return jsonResult(result);
     },
-  },
+  }),
 
   // ── Transaction / Batch ───────────────────────────────────────────────────
-  {
+  defineTool({
     name: "fhir_transaction",
     description:
       "Submit a FHIR Bundle of type 'transaction' or 'batch' to the server. " +
@@ -452,14 +415,14 @@ export const tools: ToolDefinition[] = [
         ),
     }),
     async handler(input) {
-      const { bundle } = input as { bundle: Record<string, unknown> };
+      const { bundle } = input;
       const result = await executeTransaction(bundle);
       return jsonResult(result);
     },
-  },
+  }),
 
   // ── Convenience: Patient search ───────────────────────────────────────────
-  {
+  defineTool({
     name: "fhir_search_patients",
     description:
       "Convenience tool to search for Patient resources using common demographic parameters.",
@@ -483,17 +446,7 @@ export const tools: ToolDefinition[] = [
       count: z.number().int().positive().optional().default(20),
     }),
     async handler(input) {
-      const { family, given, birthdate, gender, identifier, telecom, address, count } =
-        input as {
-          family?: string;
-          given?: string;
-          birthdate?: string;
-          gender?: string;
-          identifier?: string;
-          telecom?: string;
-          address?: string;
-          count?: number;
-        };
+      const { family, given, birthdate, gender, identifier, telecom, address, count } = input;
       const params: Record<string, string> = {};
       if (family) params["family"] = family;
       if (given) params["given"] = given;
@@ -509,10 +462,10 @@ export const tools: ToolDefinition[] = [
       });
       return jsonResult(result);
     },
-  },
+  }),
 
   // ── Convenience: Observation search ──────────────────────────────────────
-  {
+  defineTool({
     name: "fhir_search_observations",
     description:
       "Convenience tool to search for Observation resources (lab results, vitals, etc.).",
@@ -543,15 +496,7 @@ export const tools: ToolDefinition[] = [
       count: z.number().int().positive().optional().default(20),
     }),
     async handler(input) {
-      const { patientId, code, category, dateStart, dateEnd, status, count } = input as {
-        patientId?: string;
-        code?: string;
-        category?: string;
-        dateStart?: string;
-        dateEnd?: string;
-        status?: string;
-        count?: number;
-      };
+      const { patientId, code, category, dateStart, dateEnd, status, count } = input;
       const params: Record<string, string | string[]> = {};
       if (patientId) params["patient"] = patientId;
       if (code) params["code"] = code;
@@ -569,10 +514,10 @@ export const tools: ToolDefinition[] = [
       });
       return jsonResult(result);
     },
-  },
+  }),
 
   // ── Convenience: Conditions search ───────────────────────────────────────
-  {
+  defineTool({
     name: "fhir_search_conditions",
     description:
       "Convenience tool to search for Condition (problem/diagnosis) resources.",
@@ -595,16 +540,7 @@ export const tools: ToolDefinition[] = [
       count: z.number().int().positive().optional().default(20),
     }),
     async handler(input) {
-      const { patientId, code, clinicalStatus, category, onsetDateStart, onsetDateEnd, count } =
-        input as {
-          patientId?: string;
-          code?: string;
-          clinicalStatus?: string;
-          category?: string;
-          onsetDateStart?: string;
-          onsetDateEnd?: string;
-          count?: number;
-        };
+      const { patientId, code, clinicalStatus, category, onsetDateStart, onsetDateEnd, count } = input;
       const params: Record<string, string | string[]> = {};
       if (patientId) params["patient"] = patientId;
       if (code) params["code"] = code;
@@ -621,10 +557,10 @@ export const tools: ToolDefinition[] = [
       });
       return jsonResult(result);
     },
-  },
+  }),
 
   // ── Convenience: MedicationRequest search ────────────────────────────────
-  {
+  defineTool({
     name: "fhir_search_medication_requests",
     description:
       "Convenience tool to search for MedicationRequest (prescription/order) resources.",
@@ -661,15 +597,7 @@ export const tools: ToolDefinition[] = [
       count: z.number().int().positive().optional().default(20),
     }),
     async handler(input) {
-      const { patientId, status, intent, code, medication, authoredon, count } = input as {
-        patientId?: string;
-        status?: string;
-        intent?: string;
-        code?: string;
-        medication?: string;
-        authoredon?: string;
-        count?: number;
-      };
+      const { patientId, status, intent, code, medication, authoredon, count } = input;
       const params: Record<string, string> = {};
       if (patientId) params["patient"] = patientId;
       if (status) params["status"] = status;
@@ -685,10 +613,10 @@ export const tools: ToolDefinition[] = [
       });
       return jsonResult(result);
     },
-  },
+  }),
 
   // ── Convenience: Encounter search ────────────────────────────────────────
-  {
+  defineTool({
     name: "fhir_search_encounters",
     description:
       "Convenience tool to search for Encounter resources (visits, admissions, etc.).",
@@ -710,15 +638,7 @@ export const tools: ToolDefinition[] = [
       count: z.number().int().positive().optional().default(20),
     }),
     async handler(input) {
-      const { patientId, status, class: cls, type, dateStart, dateEnd, count } = input as {
-        patientId?: string;
-        status?: string;
-        class?: string;
-        type?: string;
-        dateStart?: string;
-        dateEnd?: string;
-        count?: number;
-      };
+      const { patientId, status, class: cls, type, dateStart, dateEnd, count } = input;
       const params: Record<string, string | string[]> = {};
       if (patientId) params["patient"] = patientId;
       if (status) params["status"] = status;
@@ -736,5 +656,5 @@ export const tools: ToolDefinition[] = [
       });
       return jsonResult(result);
     },
-  },
+  }),
 ];

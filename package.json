@@ -10,6 +10,7 @@
     "dev": "ts-node src/index.ts",
     "dev:http": "MCP_TRANSPORT=http ts-node src/index.ts",
     "typecheck": "tsc --noEmit",
+    "test": "node --require ts-node/register --test test/*.test.ts",
     "watch": "tsc --watch"
   },
   "dependencies": {

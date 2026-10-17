@@ -26,6 +26,8 @@ cp .env.example .env
 | `MCP_TRANSPORT` | `stdio` (default) or `http` |
 | `PORT` | HTTP port, default `3000` (http transport only) |
 | `HOST` | HTTP bind address, default `0.0.0.0` (http transport only) |
+| `MCP_SESSION_IDLE_MINUTES` | Close sessions idle this long, default `30` (http transport only) |
+| `MCP_MAX_SESSIONS` | Refuse new sessions (HTTP 503) beyond this many, default `100` (http transport only) |
 
 `.env` is read at startup from the project root. Variables already set in the
 environment take precedence, so an MCP host or shell export can override the
@@ -42,6 +44,13 @@ npm install
 npm run build
 npm start          # stdio
 npm run start:http # Streamable HTTP on PORT (default 3000)
+```
+
+Tests (Node's built-in runner against a local stub FHIR server; no
+credentials or network needed):
+
+```bash
+npm test
 ```
 
 For development with live TypeScript:
