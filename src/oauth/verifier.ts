@@ -99,7 +99,7 @@ export class JwtTokenVerifier implements OAuthTokenVerifier {
         console.error(`[oauth] JWKS fetch failed: ${describe(error)}`);
         throw new ServerError("Authorization server keys are unavailable");
       }
-      console.error(`[oauth] rejected token: ${describe(error)}`);
+      console.error(`[oauth] rejected token: ${describe(error)}${audienceDetail(error)}`);
       throw new InvalidTokenError("The access token is invalid or expired");
     }
 
@@ -130,6 +130,13 @@ function isJwksUnavailable(error: unknown): boolean {
   if (error instanceof joseErrors.JWKSTimeout || error instanceof joseErrors.JWKSInvalid) return true;
   // fetch() network failures surface as plain errors, not JOSE errors.
   return error instanceof Error && !(error instanceof joseErrors.JOSEError);
+}
+
+/** On an audience failure, the audience values the token carried (not secret; aids AS setup). */
+function audienceDetail(error: unknown): string {
+  if (!(error instanceof joseErrors.JWTClaimValidationFailed) || error.claim !== "aud") return "";
+  const { aud, audience } = error.payload as JWTPayload & { audience?: unknown };
+  return ` (aud=${JSON.stringify(aud)}${audience === undefined ? "" : `, audience=${JSON.stringify(audience)}`})`;
 }
 
 function describe(error: unknown): string {

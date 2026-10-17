@@ -27,6 +27,11 @@ document and note the `issuer` value exactly:
 curl -s https://<tenant>.forgeblocks.com/am/oauth2/realms/root/realms/<realm>/.well-known/openid-configuration \
   | jq '{issuer, jwks_uri, authorization_endpoint, token_endpoint, code_challenge_methods_supported}'
 ```
+Our tenant is openam-scp-bx26 and our realm is /alpha
+
+https://openam-scp-bx26.forgeblocks.com/am/oauth2/realms/root/realms/alpha/.well-known/openid-configuration
+
+  "issuer": "https://openam-scp-bx26.forgeblocks.com:443/am/oauth2/realms/root/realms/alpha",
 
 AM reports the issuer with an explicit `:443`
 (`https://<tenant>.forgeblocks.com:443/am/oauth2/realms/root/realms/<realm>`).
@@ -49,21 +54,28 @@ the client below.
 - **Lifetime.** 15 to 60 minutes. The server validates tokens statelessly, so
   a revoked token stays usable until it expires; short lifetimes limit that.
 - **Audience.** By default AM sets `aud` to the client ID, and it ignores the
-  RFC 8707 `resource` request parameter. Configure an **access token
-  modification script** on the provider that sets `aud` to the MCP server's
-  `MCP_PUBLIC_URL`, for example:
+  RFC 8707 `resource` request parameter. Ping's MCP guidance is an **access
+  token modification script** that copies the requested `resource` into the
+  token (Scripts > New Script > OAuth2 Access Token Modification, then select
+  it on the OAuth2 Provider's Plugins tab). Ping's sample writes a claim named
+  `audience`, which leaves `aud` unchanged; this server checks `aud`, so write
+  `aud`, and only for resources you list:
 
   ```javascript
-  // Access token modification script (sketch; check the bindings available
-  // in your AIC release). Only for tokens issued to the MCP public client.
-  if (accessToken.getClientId() === "fhir-mcp-public") {
-    accessToken.setField("aud", ["http://localhost:3000/mcp"]);
-  }
+  (function () {
+    var allowed = ["http://localhost:3000/mcp"];
+    var params = requestProperties.get("requestParams");
+    var resource = params && params.get("resource");
+    if (resource && resource.size() > 0 && allowed.indexOf(String(resource.get(0))) !== -1) {
+      accessToken.setField("aud", String(resource.get(0)));
+    }
+  }());
   ```
 
-  Use one audience per deployment (the Docker URL while testing locally, the
-  AWS URL later), or put both in the array during the transition. Confirm the
-  result by decoding a token (step 6).
+  Add each deployment's `MCP_PUBLIC_URL` to `allowed` (the Docker URL while
+  testing locally, the AWS URL later). Confirm the result by decoding a token
+  (step 6). If the server rejects a token for its audience, its log line shows
+  the `aud` (and any `audience`) the token carried.
 
   **Fallback if the audience cannot be changed:** set
   `OAUTH_AUDIENCE=fhir-mcp-public` (the client ID). Any token issued to that
