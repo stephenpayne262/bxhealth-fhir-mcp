@@ -86,6 +86,8 @@ take precedence. `.env` is gitignored; never commit real credentials.
 | `MCP_TRANSPORT` | `stdio` | `stdio` or `http` |
 | `PORT` / `HOST` | `3000` / `0.0.0.0` | HTTP listen port and address |
 | `MCP_READ_ONLY` | `true` | Expose only tools that cannot change FHIR data (see [Tools](#tools)) |
+| `MCP_PATIENT_SCOPED` | `true` | HTTP only. Each caller sees only their own patient's data: tokens must carry the patient claim, patient-data searches get `patient=Patient/{id}` forced on, every result must reference that patient, and tools that can't be limited are hidden. Requires `MCP_READ_ONLY=true`. See `src/patient-scope.ts` |
+| `OAUTH_PATIENT_CLAIM` | `patient` | Access token claim with the caller's FHIR Patient id (`123`, `Patient/123` or an absolute `.../Patient/123`). A token without it gets 403 |
 | `MCP_SESSION_IDLE_MINUTES` | `30` | Close HTTP sessions idle this long |
 | `MCP_MAX_SESSIONS` | `100` | Refuse new HTTP sessions (`503`) beyond this many |
 | `MCP_ALLOWED_ORIGINS` | none | Comma-separated browser origins allowed to call `/mcp` (CORS). Requests without an `Origin` header (CLI and desktop clients) are always allowed |
@@ -111,8 +113,10 @@ log and on `/readyz`, and every request fails until it is fixed.
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `FHIR_AUTH` | `none` | `none`: no `Authorization` header. `client_credentials`: the server's own PingOne token |
-| `PINGONE_ENV_ID`, `PINGONE_CLIENT_ID`, `PINGONE_CLIENT_SECRET` | — | Required only with `FHIR_AUTH=client_credentials` (PingOne `client_secret_basic`). If a token cannot be obtained, the tool call fails; it is never sent unauthenticated |
+| `FHIR_AUTH` | `none` | `none`: no `Authorization` header. `client_credentials`: the server's own token from an OAuth client_credentials grant |
+| `FHIR_TOKEN_URL`, `FHIR_CLIENT_ID`, `FHIR_CLIENT_SECRET` | — | Required only with `FHIR_AUTH=client_credentials`. Any OAuth 2.0 token endpoint (AIC: `.../realms/alpha/access_token`). If a token cannot be obtained, the tool call fails; it is never sent unauthenticated. The old `PINGONE_*` variables are rejected |
+| `FHIR_SCOPE` | — | Space-separated scopes requested with the grant |
+| `FHIR_TOKEN_AUTH_METHOD` | `client_secret_basic` | Or `client_secret_post` |
 
 ## Run locally and in Docker
 

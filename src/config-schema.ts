@@ -79,9 +79,17 @@ const EnvSchema = z
     OAUTH_CLIENT_MODE: z.enum(["public", "cimd"]).default("public"),
     OAUTH_ALLOWED_CLIENT_IDS: list(/,/),
     OAUTH_CIMD_CLIENT_ID_PATTERNS: list(/,/),
+    MCP_PATIENT_SCOPED: bool(true),
+    OAUTH_PATIENT_CLAIM: z.string().trim().min(1).default("patient"),
 
     FHIR_BASE_URL: z.string().trim().url(),
     FHIR_AUTH: z.enum(["none", "client_credentials"]).default("none"),
+    FHIR_TOKEN_URL: secureUrl("FHIR_TOKEN_URL").optional(),
+    FHIR_CLIENT_ID: optionalString,
+    FHIR_CLIENT_SECRET: optionalString,
+    FHIR_SCOPE: optionalString,
+    FHIR_TOKEN_AUTH_METHOD: z.enum(["client_secret_basic", "client_secret_post"]).default("client_secret_basic"),
+    // Replaced by the FHIR_* names above; rejected so an old .env fails loudly.
     PINGONE_ENV_ID: optionalString,
     PINGONE_CLIENT_ID: optionalString,
     PINGONE_CLIENT_SECRET: optionalString,
@@ -99,9 +107,25 @@ const EnvSchema = z
         }
       }
       checkClientMode(env, ctx);
+      if (env.MCP_PATIENT_SCOPED && !env.MCP_READ_ONLY) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["MCP_READ_ONLY"],
+          message: "must be true when MCP_PATIENT_SCOPED=true (write tools are not patient-scoped)",
+        });
+      }
+    }
+    for (const name of ["PINGONE_ENV_ID", "PINGONE_CLIENT_ID", "PINGONE_CLIENT_SECRET"] as const) {
+      if (env[name]) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: [name],
+          message: "is no longer read; use FHIR_TOKEN_URL, FHIR_CLIENT_ID and FHIR_CLIENT_SECRET",
+        });
+      }
     }
     if (env.FHIR_AUTH === "client_credentials") {
-      for (const name of ["PINGONE_ENV_ID", "PINGONE_CLIENT_ID", "PINGONE_CLIENT_SECRET"] as const) {
+      for (const name of ["FHIR_TOKEN_URL", "FHIR_CLIENT_ID", "FHIR_CLIENT_SECRET"] as const) {
         if (!env[name]) {
           ctx.addIssue({
             code: z.ZodIssueCode.custom,
@@ -158,11 +182,25 @@ export interface OAuthConfig {
   clockSkewSeconds: number;
   /** Which clients' tokens are accepted (OAUTH_CLIENT_MODE). */
   clientPolicy: ClientPolicy;
+  /**
+   * Set when MCP_PATIENT_SCOPED=true: the claim holding the caller's FHIR
+   * Patient id. Tokens without it are refused, and every tool call is limited
+   * to that patient's data (patient-scope.ts).
+   */
+  patientClaim?: string;
 }
 
 export type FhirAuthConfig =
   | { mode: "none" }
-  | { mode: "client_credentials"; clientId: string; clientSecret: string; tokenUrl: string };
+  | {
+      mode: "client_credentials";
+      tokenUrl: string;
+      clientId: string;
+      clientSecret: string;
+      /** Space-separated scopes to request; omitted from the request when unset. */
+      scope?: string;
+      authMethod: "client_secret_basic" | "client_secret_post";
+    };
 
 export interface Config {
   server: {
@@ -206,6 +244,7 @@ export function parseConfig(env: Record<string, string | undefined>): Config {
             e.OAUTH_CLIENT_MODE === "cimd"
               ? { mode: "cimd", patterns: e.OAUTH_CIMD_CLIENT_ID_PATTERNS }
               : { mode: "public", allowedClientIds: e.OAUTH_ALLOWED_CLIENT_IDS },
+          patientClaim: e.MCP_PATIENT_SCOPED ? e.OAUTH_PATIENT_CLAIM : undefined,
         }
       : null;
 
@@ -213,9 +252,11 @@ export function parseConfig(env: Record<string, string | undefined>): Config {
     e.FHIR_AUTH === "client_credentials"
       ? {
           mode: "client_credentials",
-          clientId: e.PINGONE_CLIENT_ID!,
-          clientSecret: e.PINGONE_CLIENT_SECRET!,
-          tokenUrl: `https://auth.pingone.com/${e.PINGONE_ENV_ID}/as/token`,
+          tokenUrl: e.FHIR_TOKEN_URL!,
+          clientId: e.FHIR_CLIENT_ID!,
+          clientSecret: e.FHIR_CLIENT_SECRET!,
+          scope: e.FHIR_SCOPE,
+          authMethod: e.FHIR_TOKEN_AUTH_METHOD,
         }
       : { mode: "none" };
 

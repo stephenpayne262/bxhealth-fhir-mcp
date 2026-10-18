@@ -32,8 +32,10 @@ them on every push. `test/oauth.test.ts` starts:
 | Origin | Disallowed origin → 403 before auth. Allowed origin preflight → 204 with CORS headers, which also appear on the 401 | `oauth.test.ts` |
 | Logging | Audit line has `sub`, `client_id`, tool and outcome. The raw token, its signature and the tool arguments never appear in logs | `oauth.test.ts` |
 | Issuer discovery | Mismatched issuer is a permanent error, reported on status and never retried. Unreachable issuer is reported, then retried | `oauth.test.ts` |
-| Configuration | HTTP refuses to start without `MCP_PUBLIC_URL`/`OAUTH_ISSUER`. `http://` is refused except for localhost. Fragments and relative URLs refused. `none`/`HS256` refused. Defaults and overrides. `MCP_READ_ONLY` parsing. `client_credentials` requires the PingOne settings | `config.test.ts` |
-| FHIR client | Repeated array parameters, path validation, `$operation` paths, one shared token fetch, 401 retry once, no retry loop | `fhir-client.test.ts` |
+| Configuration | HTTP refuses to start without `MCP_PUBLIC_URL`/`OAUTH_ISSUER`. `http://` is refused except for localhost. Fragments and relative URLs refused. `none`/`HS256` refused. Defaults and overrides. `MCP_READ_ONLY` parsing. `client_credentials` requires `FHIR_TOKEN_URL`/`FHIR_CLIENT_ID`/`FHIR_CLIENT_SECRET`; old `PINGONE_*` rejected. Patient scoping on by default and needs read-only | `config.test.ts` |
+| FHIR client | Repeated array parameters, path validation, `$operation` paths, client_credentials request (grant, scope, Basic credentials), one shared token fetch, 401 retry once, no retry loop | `fhir-client.test.ts` |
+| Patient scoping | Unscopable tools hidden. Searches and reads get `patient=Patient/{id}` forced on. Patient pinned to own id. Shared types pass, others refused. `_revinclude`/`_has`/`_contained`/`_filter` refused. Resources not referencing the caller (including via `contained` only, or `Patient/p10` vs `p1`) filtered out of searches, reads and `$everything`. Pass-through without a patient | `patient-scope.test.ts` |
+| Patient claim | Bare id, `Patient/id` and absolute references accepted; other types, invalid ids and non-strings refused; missing claim is 403 | `patient-claim.test.ts`, `oauth.test.ts` |
 | FHIR auth none | No token request and no `Authorization` header | `fhir-auth-none.test.ts` |
 
 The suite was checked by deliberately disabling three protections: the

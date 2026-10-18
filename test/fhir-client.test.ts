@@ -18,8 +18,9 @@ let respond: (req: IncomingMessage) => { status: number; body: unknown } = () =>
   body: { resourceType: "Bundle" },
 });
 
-// Stub the PingOne token call; auth.ts uses the default axios export.
+// Stub the token endpoint call; auth.ts uses the default axios export.
 let tokenCalls = 0;
+let tokenRequest: { url: string; body: string; headers: Record<string, string> } | undefined;
 let nextToken = "token-1";
 
 let client: typeof import("../src/fhir-client");
@@ -40,13 +41,15 @@ before(async () => {
 
   // config.ts reads these at import time, so set them before loading src/.
   process.env.FHIR_AUTH = "client_credentials";
-  process.env.PINGONE_ENV_ID = "test-env";
-  process.env.PINGONE_CLIENT_ID = "test-client";
-  process.env.PINGONE_CLIENT_SECRET = "test-secret";
+  process.env.FHIR_TOKEN_URL = "https://issuer.example.com/oauth2/access_token";
+  process.env.FHIR_CLIENT_ID = "test-client";
+  process.env.FHIR_CLIENT_SECRET = "test:secret";
+  process.env.FHIR_SCOPE = "system/*.read fhir/read";
   process.env.FHIR_BASE_URL = `http://127.0.0.1:${port}/fhir`;
 
-  axios.post = (async () => {
+  axios.post = (async (url: string, body: string, options: { headers: Record<string, string> }) => {
     tokenCalls++;
+    tokenRequest = { url, body, headers: options.headers };
     await new Promise((r) => setTimeout(r, 10));
     return { data: { access_token: nextToken, token_type: "Bearer", expires_in: 3600 } };
   }) as typeof axios.post;
@@ -125,6 +128,23 @@ describe("executeOperation", () => {
 });
 
 describe("auth", () => {
+  test("the token request is a client_credentials grant with the scope and basic credentials", async () => {
+    await client.readResource("Patient", "1");
+    assert.equal(tokenRequest!.url, "https://issuer.example.com/oauth2/access_token");
+    const form = new URLSearchParams(tokenRequest!.body);
+    assert.equal(form.get("grant_type"), "client_credentials");
+    assert.equal(form.get("scope"), "system/*.read fhir/read");
+    assert.equal(form.get("client_secret"), null);
+    const basic = Buffer.from(tokenRequest!.headers.Authorization.replace(/^Basic /, ""), "base64").toString();
+    assert.equal(basic, "test-client:test%3Asecret");
+  });
+
+  test("/metadata is sent with the token too", async () => {
+    await client.getCapabilityStatement();
+    assert.equal(requests[0].url, "/fhir/metadata");
+    assert.equal(requests[0].authorization, "Bearer token-1");
+  });
+
   test("concurrent requests share one token fetch", async () => {
     await Promise.all([1, 2, 3, 4, 5].map((i) => client.readResource("Patient", String(i))));
     assert.equal(tokenCalls, 1);

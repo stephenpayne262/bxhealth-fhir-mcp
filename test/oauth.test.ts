@@ -94,6 +94,9 @@ before(async () => {
     OAUTH_ISSUER: issuer,
     OAUTH_REQUIRED_SCOPES: SCOPE,
     MCP_ALLOWED_ORIGINS: ALLOWED_ORIGIN,
+    // The tool set and patient filtering are covered by patient-scope.test.ts;
+    // here only the verifier's claim check is tested (see "patient claim").
+    MCP_PATIENT_SCOPED: "false",
     FHIR_BASE_URL: `${fhirBase}/fhir`,
   });
 
@@ -382,6 +385,26 @@ describe("client mode", () => {
     }
     await assert.rejects(verifier.verifyAccessToken(await mint({}, rsKey, ["client_id"])), /invalid or expired/);
     assert.ok(logged.some((line) => line.includes("token has no client_id or azp")));
+  });
+});
+
+describe("patient claim", () => {
+  const verifier = () => new verifierModule.JwtTokenVerifier({ ...configModule.config.oauth!, patientClaim: "patient" });
+
+  test("the patient id is passed on from the claim", async () => {
+    const info = await verifier().verifyAccessToken(await mint({ patient: "123" }));
+    assert.equal(info.extra?.patient, "123");
+  });
+
+  test("a token without a usable patient claim gets 403, not 401", async () => {
+    for (const claims of [{}, { patient: "" }, { patient: "Practitioner/9" }, { patient: "../x" }, { patient: 123 }]) {
+      await assert.rejects(
+        verifier().verifyAccessToken(await mint(claims)),
+        (error: Error) => error.constructor.name === "InsufficientScopeError",
+        JSON.stringify(claims)
+      );
+    }
+    assert.ok(logged.some((line) => line.includes('no usable "patient" claim (sub="alice")')));
   });
 });
 

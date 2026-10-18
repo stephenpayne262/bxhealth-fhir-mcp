@@ -59,7 +59,7 @@ spec:
             - name: NODE_ENV
               value: "production"
           envFrom:
-            # PINGONE_ENV_ID, PINGONE_CLIENT_ID, PINGONE_CLIENT_SECRET,
+            # FHIR_TOKEN_URL, FHIR_CLIENT_ID, FHIR_CLIENT_SECRET, FHIR_SCOPE,
             # FHIR_BASE_URL. The FHIR base URL is not a secret, but it
             # lives here so there is exactly one place to change it.
             - secretRef:

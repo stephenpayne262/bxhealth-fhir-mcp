@@ -1,20 +1,18 @@
 import { z } from "zod";
 import {
-  readResource,
   vreadResource,
   createResource,
   updateResource,
   patchResource,
   deleteResource,
-  searchResource,
   getResourceHistory,
   getTypeHistory,
   getCapabilityStatement,
   executeOperation,
   executeTransaction,
-  getPatientEverything,
   validateResource,
 } from "./fhir-client.js";
+import { patientParam, scopedEverything, scopedRead, scopedSearch } from "./patient-scope.js";
 
 export interface ToolDefinition {
   name: string;
@@ -25,8 +23,19 @@ export interface ToolDefinition {
    * callable. Reported to clients as the MCP `readOnlyHint` annotation.
    */
   readOnly: boolean;
+  /**
+   * True only if the tool is safe in patient-scoped mode: it limits itself to
+   * `ctx.patient` through patient-scope.ts, or touches no patient data. With
+   * patient scoping on, tools with false are neither listed nor callable.
+   */
+  patientSafe: boolean;
   inputSchema: z.ZodTypeAny;
-  handler: (input: unknown) => Promise<string>;
+  handler: (input: unknown, ctx: ToolContext) => Promise<string>;
+}
+
+export interface ToolContext {
+  /** The caller's FHIR Patient id when patient scoping is on; otherwise undefined. */
+  patient?: string;
 }
 
 /**
@@ -38,8 +47,9 @@ function defineTool<S extends z.ZodTypeAny>(tool: {
   name: string;
   description: string;
   readOnly: boolean;
+  patientSafe: boolean;
   inputSchema: S;
-  handler: (input: z.infer<S>) => Promise<string>;
+  handler: (input: z.infer<S>, ctx: ToolContext) => Promise<string>;
 }): ToolDefinition {
   return tool as ToolDefinition;
 }
@@ -74,6 +84,7 @@ export const tools: ToolDefinition[] = [
   defineTool({
     name: "fhir_get_metadata",
     readOnly: true,
+    patientSafe: true,
     description:
       "Retrieve the FHIR server capability statement (TerminologyCapabilities / CapabilityStatement). " +
       "Describes supported resources, operations, search parameters, and server features.",
@@ -88,6 +99,7 @@ export const tools: ToolDefinition[] = [
   defineTool({
     name: "fhir_read_resource",
     readOnly: true,
+    patientSafe: true,
     description:
       "Read a single FHIR R4 resource by its resource type and logical ID. " +
       "Returns the current version of the resource.",
@@ -95,9 +107,9 @@ export const tools: ToolDefinition[] = [
       resourceType: ResourceTypeSchema,
       id: z.string().describe("Logical ID of the resource"),
     }),
-    async handler(input) {
+    async handler(input, ctx) {
       const { resourceType, id } = input;
-      const result = await readResource(resourceType, id);
+      const result = await scopedRead(ctx.patient, resourceType, id);
       return jsonResult(result);
     },
   }),
@@ -106,6 +118,7 @@ export const tools: ToolDefinition[] = [
   defineTool({
     name: "fhir_vread_resource",
     readOnly: true,
+    patientSafe: false,
     description:
       "Read a specific historical version of a FHIR R4 resource by type, logical ID, and version ID.",
     inputSchema: z.object({
@@ -124,6 +137,7 @@ export const tools: ToolDefinition[] = [
   defineTool({
     name: "fhir_search_resources",
     readOnly: true,
+    patientSafe: true,
     description:
       "Search for FHIR R4 resources of a given type using standard FHIR search parameters. " +
       "Supports all FHIR search modifiers, chaining, and result controls (_count, _sort, _include, etc.).",
@@ -167,9 +181,9 @@ export const tools: ToolDefinition[] = [
         .optional()
         .describe("Subset of elements to return (_elements). E.g. ['id', 'name', 'birthDate']"),
     }),
-    async handler(input) {
+    async handler(input, ctx) {
       const { resourceType, searchParams, count, offset, sort, includes, revIncludes, summary, elements } = input;
-      const result = await searchResource({
+      const result = await scopedSearch(ctx.patient, {
         resourceType,
         searchParams,
         count,
@@ -188,6 +202,7 @@ export const tools: ToolDefinition[] = [
   defineTool({
     name: "fhir_create_resource",
     readOnly: false,
+    patientSafe: false,
     description:
       "Create a new FHIR R4 resource on the server. The server assigns the logical ID. " +
       "Returns the created resource with server-assigned id and meta.",
@@ -208,6 +223,7 @@ export const tools: ToolDefinition[] = [
   defineTool({
     name: "fhir_update_resource",
     readOnly: false,
+    patientSafe: false,
     description:
       "Update (replace) an existing FHIR R4 resource using a full resource representation. " +
       "The resource body must include the same id as the path parameter.",
@@ -229,6 +245,7 @@ export const tools: ToolDefinition[] = [
   defineTool({
     name: "fhir_patch_resource",
     readOnly: false,
+    patientSafe: false,
     description:
       "Partially update a FHIR R4 resource using JSON Patch (RFC 6902) or a FHIR Parameters patch. " +
       "JSON Patch is the default; pass patchType='fhir-patch' for a FHIR patch.",
@@ -258,6 +275,7 @@ export const tools: ToolDefinition[] = [
   defineTool({
     name: "fhir_delete_resource",
     readOnly: false,
+    patientSafe: false,
     description: "Delete a FHIR R4 resource by type and logical ID.",
     inputSchema: z.object({
       resourceType: ResourceTypeSchema,
@@ -276,6 +294,7 @@ export const tools: ToolDefinition[] = [
   defineTool({
     name: "fhir_resource_history",
     readOnly: true,
+    patientSafe: false,
     description:
       "Retrieve the version history for a specific FHIR R4 resource instance.",
     inputSchema: z.object({
@@ -303,6 +322,7 @@ export const tools: ToolDefinition[] = [
   defineTool({
     name: "fhir_type_history",
     readOnly: true,
+    patientSafe: false,
     description:
       "Retrieve the change history for all resources of a given FHIR R4 type.",
     inputSchema: z.object({
@@ -329,11 +349,15 @@ export const tools: ToolDefinition[] = [
   defineTool({
     name: "fhir_patient_everything",
     readOnly: true,
+    patientSafe: true,
     description:
       "Invoke the FHIR $everything operation on a Patient to retrieve all resources " +
       "in the patient compartment (encounters, observations, conditions, medications, etc.).",
     inputSchema: z.object({
-      patientId: z.string().describe("Logical ID of the Patient resource"),
+      patientId: z
+        .string()
+        .optional()
+        .describe("Logical ID of the Patient resource. Defaults to the signed-in member when results are limited to one patient."),
       start: z
         .string()
         .optional()
@@ -353,14 +377,14 @@ export const tools: ToolDefinition[] = [
         .optional()
         .describe("Page size for the response bundle"),
     }),
-    async handler(input) {
+    async handler(input, ctx) {
       const { patientId, start, end, types, count } = input;
       const params: Record<string, string> = {};
       if (start) params["start"] = start;
       if (end) params["end"] = end;
       if (types?.length) params["_type"] = types.join(",");
       if (count !== undefined) params["_count"] = String(count);
-      const result = await getPatientEverything(patientId, params);
+      const result = await scopedEverything(ctx.patient, patientId, params);
       return jsonResult(result);
     },
   }),
@@ -370,6 +394,7 @@ export const tools: ToolDefinition[] = [
     name: "fhir_validate_resource",
     // POSTs the resource, but $validate never stores or changes anything.
     readOnly: true,
+    patientSafe: true,
     description:
       "Invoke the FHIR $validate operation to validate a resource against the base FHIR R4 " +
       "specification or an optional StructureDefinition profile URL.",
@@ -393,6 +418,7 @@ export const tools: ToolDefinition[] = [
     name: "fhir_execute_operation",
     // Can invoke any operation, including ones that modify data.
     readOnly: false,
+    patientSafe: false,
     description:
       "Invoke a named FHIR operation (e.g. $expand, $lookup, $translate, $validate-code, $closure, " +
       "$everything, $match, $apply, $process-message). Supports system, type, and instance level operations.",
@@ -426,6 +452,7 @@ export const tools: ToolDefinition[] = [
   defineTool({
     name: "fhir_transaction",
     readOnly: false,
+    patientSafe: false,
     description:
       "Submit a FHIR Bundle of type 'transaction' or 'batch' to the server. " +
       "Transactions are atomic; batches process each entry independently.",
@@ -448,6 +475,7 @@ export const tools: ToolDefinition[] = [
   defineTool({
     name: "fhir_search_patients",
     readOnly: true,
+    patientSafe: false,
     description:
       "Convenience tool to search for Patient resources using common demographic parameters.",
     inputSchema: z.object({
@@ -469,7 +497,7 @@ export const tools: ToolDefinition[] = [
       address: z.string().optional().describe("Address string search"),
       count: z.number().int().positive().optional().default(20),
     }),
-    async handler(input) {
+    async handler(input, ctx) {
       const { family, given, birthdate, gender, identifier, telecom, address, count } = input;
       const params: Record<string, string> = {};
       if (family) params["family"] = family;
@@ -479,7 +507,7 @@ export const tools: ToolDefinition[] = [
       if (identifier) params["identifier"] = identifier;
       if (telecom) params["telecom"] = telecom;
       if (address) params["address"] = address;
-      const result = await searchResource({
+      const result = await scopedSearch(ctx.patient, {
         resourceType: "Patient",
         searchParams: params,
         count: count ?? 20,
@@ -492,6 +520,7 @@ export const tools: ToolDefinition[] = [
   defineTool({
     name: "fhir_search_observations",
     readOnly: true,
+    patientSafe: true,
     description:
       "Convenience tool to search for Observation resources (lab results, vitals, etc.).",
     inputSchema: z.object({
@@ -520,10 +549,11 @@ export const tools: ToolDefinition[] = [
         .describe("Status (registered|preliminary|final|amended|corrected|cancelled|entered-in-error|unknown)"),
       count: z.number().int().positive().optional().default(20),
     }),
-    async handler(input) {
+    async handler(input, ctx) {
       const { patientId, code, category, dateStart, dateEnd, status, count } = input;
       const params: Record<string, string | string[]> = {};
-      if (patientId) params["patient"] = patientId;
+      const patient = patientParam(ctx.patient, patientId);
+      if (patient) params["patient"] = patient;
       if (code) params["code"] = code;
       if (category) params["category"] = category;
       if (status) params["status"] = status;
@@ -531,7 +561,7 @@ export const tools: ToolDefinition[] = [
       if (dateStart) dateFilters.push(`ge${dateStart}`);
       if (dateEnd) dateFilters.push(`le${dateEnd}`);
       if (dateFilters.length) params["date"] = dateFilters;
-      const result = await searchResource({
+      const result = await scopedSearch(ctx.patient, {
         resourceType: "Observation",
         searchParams: params,
         count: count ?? 20,
@@ -545,6 +575,7 @@ export const tools: ToolDefinition[] = [
   defineTool({
     name: "fhir_search_conditions",
     readOnly: true,
+    patientSafe: true,
     description:
       "Convenience tool to search for Condition (problem/diagnosis) resources.",
     inputSchema: z.object({
@@ -565,10 +596,11 @@ export const tools: ToolDefinition[] = [
       onsetDateEnd: z.string().optional().describe("Onset date <= (ISO 8601)"),
       count: z.number().int().positive().optional().default(20),
     }),
-    async handler(input) {
+    async handler(input, ctx) {
       const { patientId, code, clinicalStatus, category, onsetDateStart, onsetDateEnd, count } = input;
       const params: Record<string, string | string[]> = {};
-      if (patientId) params["patient"] = patientId;
+      const patient = patientParam(ctx.patient, patientId);
+      if (patient) params["patient"] = patient;
       if (code) params["code"] = code;
       if (clinicalStatus) params["clinical-status"] = clinicalStatus;
       if (category) params["category"] = category;
@@ -576,7 +608,7 @@ export const tools: ToolDefinition[] = [
       if (onsetDateStart) dateFilters.push(`ge${onsetDateStart}`);
       if (onsetDateEnd) dateFilters.push(`le${onsetDateEnd}`);
       if (dateFilters.length) params["onset-date"] = dateFilters;
-      const result = await searchResource({
+      const result = await scopedSearch(ctx.patient, {
         resourceType: "Condition",
         searchParams: params,
         count: count ?? 20,
@@ -589,6 +621,7 @@ export const tools: ToolDefinition[] = [
   defineTool({
     name: "fhir_search_medication_requests",
     readOnly: true,
+    patientSafe: true,
     description:
       "Convenience tool to search for MedicationRequest (prescription/order) resources.",
     inputSchema: z.object({
@@ -623,16 +656,17 @@ export const tools: ToolDefinition[] = [
         .describe("Date authored (ISO 8601, may include modifiers)"),
       count: z.number().int().positive().optional().default(20),
     }),
-    async handler(input) {
+    async handler(input, ctx) {
       const { patientId, status, intent, code, medication, authoredon, count } = input;
       const params: Record<string, string> = {};
-      if (patientId) params["patient"] = patientId;
+      const patient = patientParam(ctx.patient, patientId);
+      if (patient) params["patient"] = patient;
       if (status) params["status"] = status;
       if (intent) params["intent"] = intent;
       if (code) params["code"] = code;
       if (medication) params["medication"] = medication;
       if (authoredon) params["authoredon"] = authoredon;
-      const result = await searchResource({
+      const result = await scopedSearch(ctx.patient, {
         resourceType: "MedicationRequest",
         searchParams: params,
         count: count ?? 20,
@@ -646,6 +680,7 @@ export const tools: ToolDefinition[] = [
   defineTool({
     name: "fhir_search_encounters",
     readOnly: true,
+    patientSafe: true,
     description:
       "Convenience tool to search for Encounter resources (visits, admissions, etc.).",
     inputSchema: z.object({
@@ -665,10 +700,11 @@ export const tools: ToolDefinition[] = [
       dateEnd: z.string().optional().describe("Date <= (ISO 8601)"),
       count: z.number().int().positive().optional().default(20),
     }),
-    async handler(input) {
+    async handler(input, ctx) {
       const { patientId, status, class: cls, type, dateStart, dateEnd, count } = input;
       const params: Record<string, string | string[]> = {};
-      if (patientId) params["patient"] = patientId;
+      const patient = patientParam(ctx.patient, patientId);
+      if (patient) params["patient"] = patient;
       if (status) params["status"] = status;
       if (cls) params["class"] = cls;
       if (type) params["type"] = type;
@@ -676,7 +712,7 @@ export const tools: ToolDefinition[] = [
       if (dateStart) dateFilters.push(`ge${dateStart}`);
       if (dateEnd) dateFilters.push(`le${dateEnd}`);
       if (dateFilters.length) params["date"] = dateFilters;
-      const result = await searchResource({
+      const result = await scopedSearch(ctx.patient, {
         resourceType: "Encounter",
         searchParams: params,
         count: count ?? 20,

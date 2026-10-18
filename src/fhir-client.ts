@@ -10,8 +10,6 @@ export interface FhirRequestOptions {
   body?: unknown;
   params?: Record<string, string | string[]>;
   headers?: Record<string, string>;
-  /** Skip authentication for publicly accessible endpoints (e.g. /metadata) */
-  skipAuth?: boolean;
 }
 
 export interface FhirSearchParams {
@@ -45,12 +43,10 @@ const client = axios.create({
 async function fhirRequest<T = unknown>(options: FhirRequestOptions): Promise<T> {
   const send = async (): Promise<T> => {
     const authHeaders: Record<string, string> = {};
-    if (!options.skipAuth) {
-      const token = await getAccessToken();
-      // null means FHIR_AUTH=none; a failure to get a token throws instead.
-      if (token) {
-        authHeaders.Authorization = `Bearer ${token}`;
-      }
+    const token = await getAccessToken();
+    // null means FHIR_AUTH=none; a failure to get a token throws instead.
+    if (token) {
+      authHeaders.Authorization = `Bearer ${token}`;
     }
 
     const response = await client.request<T>({
@@ -72,7 +68,6 @@ async function fhirRequest<T = unknown>(options: FhirRequestOptions): Promise<T>
     // A 401 with a cached token usually means it was revoked or the signing
     // keys rotated. Drop the cache and retry once with a fresh token.
     if (
-      !options.skipAuth &&
       config.fhir.auth.mode !== "none" &&
       axios.isAxiosError(error) &&
       error.response?.status === 401
@@ -190,7 +185,7 @@ export async function deleteResource(resourceType: string, id: string): Promise<
 
 // ── Search ────────────────────────────────────────────────────────────────────
 
-export async function searchResource(opts: FhirSearchParams): Promise<unknown> {
+function searchQuery(opts: FhirSearchParams): Record<string, string | string[]> {
   const params: Record<string, string | string[]> = { ...opts.searchParams };
 
   if (opts.count !== undefined) params["_count"] = String(opts.count);
@@ -200,12 +195,11 @@ export async function searchResource(opts: FhirSearchParams): Promise<unknown> {
   if (opts.elements?.length) params["_elements"] = opts.elements.join(",");
   if (opts.includes?.length) params["_include"] = opts.includes;
   if (opts.revIncludes?.length) params["_revinclude"] = opts.revIncludes;
+  return params;
+}
 
-  return fhirRequest({
-    method: "GET",
-    path: resourcePath(opts.resourceType),
-    params,
-  });
+export async function searchResource(opts: FhirSearchParams): Promise<unknown> {
+  return fhirRequest({ method: "GET", path: resourcePath(opts.resourceType), params: searchQuery(opts) });
 }
 
 // ── History ───────────────────────────────────────────────────────────────────
@@ -240,8 +234,9 @@ export async function getTypeHistory(
 // ── Operations ────────────────────────────────────────────────────────────────
 
 export async function getCapabilityStatement(): Promise<unknown> {
-  // /metadata is publicly accessible on most FHIR servers — no token required
-  return fhirRequest({ method: "GET", path: "/metadata", skipAuth: true });
+  // Sent with the token like every other call: many servers serve /metadata
+  // anonymously, but Smile CDR's /fhir-agent endpoint answers 401 without one.
+  return fhirRequest({ method: "GET", path: "/metadata" });
 }
 
 export async function executeOperation(

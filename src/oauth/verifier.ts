@@ -1,10 +1,11 @@
 import { createRemoteJWKSet, errors as joseErrors, jwtVerify, type JWTPayload } from "jose";
 import type { OAuthTokenVerifier } from "@modelcontextprotocol/sdk/server/auth/provider.js";
-import { InvalidTokenError, ServerError } from "@modelcontextprotocol/sdk/server/auth/errors.js";
+import { InsufficientScopeError, InvalidTokenError, ServerError } from "@modelcontextprotocol/sdk/server/auth/errors.js";
 import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 import type { OAuthConfig } from "../config-schema.js";
 import { clientRejection } from "./client-policy.js";
 import { IssuerMismatchError, fetchIssuerMetadata } from "./discovery.js";
+import { patientIdFromClaim } from "./patient-claim.js";
 
 /**
  * Validates access tokens as JWTs against the issuer's JWKS (RFC 9068 style).
@@ -12,7 +13,9 @@ import { IssuerMismatchError, fetchIssuerMetadata } from "./discovery.js";
  * Checked on every request: signature (key chosen by `kid`), algorithm
  * allowlist, `iss` (exact), `aud` (must contain our resource identifier),
  * `exp`/`nbf` with clock skew, presence of `sub`, and that the client is
- * allowed by OAUTH_CLIENT_MODE (client-policy.ts). Scope is checked by
+ * allowed by OAUTH_CLIENT_MODE (client-policy.ts). When patient scoping is
+ * on, the token must also name a Patient (patient-claim.ts); a token without
+ * one gets 403, not 401, since signing in again won't change it. Scope is checked by
  * the SDK's requireBearerAuth against the scopes returned here.
  *
  * Errors sent to clients are deliberately generic; the specific reason is
@@ -112,12 +115,21 @@ export class JwtTokenVerifier implements OAuthTokenVerifier {
       throw new InvalidTokenError("The access token is invalid or expired");
     }
 
+    let patient: string | undefined;
+    if (this.config.patientClaim) {
+      patient = patientIdFromClaim(payload[this.config.patientClaim]);
+      if (!patient) {
+        console.error(`[oauth] rejected token: no usable "${this.config.patientClaim}" claim (sub=${JSON.stringify(payload.sub)})`);
+        throw new InsufficientScopeError("The access token does not identify a patient");
+      }
+    }
+
     return {
       token,
       clientId: clientId ?? "unknown",
       scopes: scopesOf(payload),
       expiresAt: payload.exp,
-      extra: { sub: payload.sub, iss: payload.iss, jti: payload.jti },
+      extra: { sub: payload.sub, iss: payload.iss, jti: payload.jti, patient },
     };
   }
 }

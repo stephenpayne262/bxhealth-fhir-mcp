@@ -1,5 +1,8 @@
 # bxhealth-fhir-mcp image. Build from the repo root:
 #   docker build -f infra/Dockerfile -t bxhealth-fhir-mcp .
+# Typecheck and tests (the CI gates) run in the `check` stage:
+#   docker build -f infra/Dockerfile --target check .
+# For local runs use compose.yaml (`docker compose up --build`).
 #
 # The image defaults to MCP_TRANSPORT=http because that is the only mode a
 # gateway can proxy; stdio remains available by overriding the env var.
@@ -11,7 +14,12 @@ COPY tsconfig.json ./
 COPY src ./src
 RUN npm run build
 
-FROM node:22-alpine
+# Not part of the default build: BuildKit skips stages the target doesn't need.
+FROM builder AS check
+COPY test ./test
+RUN npm run typecheck && npm test
+
+FROM node:22-alpine AS runtime
 WORKDIR /app
 ENV NODE_ENV=production
 ENV MCP_TRANSPORT=http

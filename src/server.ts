@@ -21,11 +21,20 @@ export const SERVER_VERSION = "1.0.0";
  *
  * With MCP_READ_ONLY=true only tools marked readOnly are exposed; the others
  * are absent from tools/list and rejected as unknown if called anyway.
+ * Patient scoping (MCP_PATIENT_SCOPED) does the same for tools not marked
+ * patientSafe, and passes each handler the caller's patient id.
  */
 export function createServer(available: ToolDefinition[] = availableTools()): Server {
   const server = new Server(
     { name: SERVER_NAME, version: SERVER_VERSION },
-    { capabilities: { tools: {} } }
+    {
+      capabilities: { tools: {} },
+      instructions: patientScoped()
+        ? "All data is limited to the signed-in member's own records. Leave patientId out: every tool " +
+          "defaults to the member, and other ids are refused. To get the member's own Patient record, " +
+          "search Patient with no parameters."
+        : undefined,
+    }
   );
 
   // ── List Tools ──────────────────────────────────────────────────────────────
@@ -62,7 +71,12 @@ export function createServer(available: ToolDefinition[] = availableTools()): Se
 
     const started = Date.now();
     try {
-      const result = await tool.handler(parseResult.data);
+      const patient = extra.authInfo?.extra?.patient;
+      // The verifier refuses tokens without a patient, so this is a backstop.
+      if (patientScoped() && typeof patient !== "string") {
+        throw new Error("No patient context in the access token.");
+      }
+      const result = await tool.handler(parseResult.data, { patient: patientScoped() ? (patient as string) : undefined });
       auditToolCall(extra.authInfo, name, "ok", started);
       return {
         content: [{ type: "text" as const, text: result }],
@@ -81,7 +95,11 @@ export function createServer(available: ToolDefinition[] = availableTools()): Se
 }
 
 export function availableTools(): ToolDefinition[] {
-  return config.tools.readOnly ? tools.filter((t) => t.readOnly) : tools;
+  return tools.filter((t) => (t.readOnly || !config.tools.readOnly) && (t.patientSafe || !patientScoped()));
+}
+
+function patientScoped(): boolean {
+  return Boolean(config.oauth?.patientClaim);
 }
 
 // ── Audit log ────────────────────────────────────────────────────────────────

@@ -71,7 +71,7 @@ kubectl create secret generic bxhealth-fhir-mcp-secrets -n ping-devops-robpieper
   --from-env-file=.env
 ```
 
-Carries `PINGONE_ENV_ID`, `PINGONE_CLIENT_ID`, `PINGONE_CLIENT_SECRET`,
+Carries `FHIR_TOKEN_URL`, `FHIR_CLIENT_ID`, `FHIR_CLIENT_SECRET`, `FHIR_SCOPE`,
 `FHIR_BASE_URL`. The FHIR base URL is not secret but lives here so there
 is one place to change it. The CI ServiceAccount deliberately cannot
 read this secret.

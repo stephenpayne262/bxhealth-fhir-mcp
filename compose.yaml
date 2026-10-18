@@ -1,0 +1,27 @@
+# Local run in Docker Desktop. Nothing runs on the host but Docker.
+#   docker compose up --build -d     # server on http://localhost:3000/mcp
+#   docker compose logs -f mcp
+#   docker compose down
+# Typecheck and tests: docker build -f infra/Dockerfile --target check .
+#
+# Config comes from .env (never baked into the image: .dockerignore excludes it).
+# Inside the container "localhost" is the container itself; reach services on
+# your Mac (e.g. a local FHIR server) at host.docker.internal.
+services:
+  mcp:
+    build:
+      context: .
+      dockerfile: infra/Dockerfile
+      target: runtime
+    image: bxhealth-fhir-mcp:local
+    env_file: .env
+    environment:
+      MCP_TRANSPORT: http
+    ports:
+      - "3000:3000"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped

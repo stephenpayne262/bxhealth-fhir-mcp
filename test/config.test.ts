@@ -32,7 +32,15 @@ describe("transport and fail-closed rules", () => {
       algorithms: ["RS256", "ES256"],
       clockSkewSeconds: 30,
       clientPolicy: { mode: "public", allowedClientIds: [] },
+      patientClaim: "patient",
     });
+  });
+
+  test("patient scoping is on by default, its claim is configurable, and it needs read-only", () => {
+    assert.equal(parseConfig({ ...http, OAUTH_PATIENT_CLAIM: "fhirUser" }).oauth?.patientClaim, "fhirUser");
+    assert.equal(parseConfig({ ...http, MCP_PATIENT_SCOPED: "false" }).oauth?.patientClaim, undefined);
+    assert.throws(() => parseConfig({ ...http, MCP_READ_ONLY: "false" }), /MCP_READ_ONLY: must be true when MCP_PATIENT_SCOPED=true/);
+    assert.doesNotThrow(() => parseConfig({ ...http, MCP_READ_ONLY: "false", MCP_PATIENT_SCOPED: "false" }));
   });
 
   test("OAUTH_AUDIENCE and scopes can be overridden", () => {
@@ -132,15 +140,43 @@ describe("tools and FHIR auth", () => {
     assert.throws(() => parseConfig({ ...base, MCP_READ_ONLY: "no" }), /MCP_READ_ONLY/);
   });
 
-  test("client_credentials requires the PingOne settings", () => {
-    assert.throws(() => parseConfig({ ...base, FHIR_AUTH: "client_credentials" }), /PINGONE_ENV_ID is required/);
-    const config = parseConfig({
-      ...base,
-      FHIR_AUTH: "client_credentials",
-      PINGONE_ENV_ID: "env",
-      PINGONE_CLIENT_ID: "id",
-      PINGONE_CLIENT_SECRET: "secret",
+  const clientCredentials = {
+    ...base,
+    FHIR_AUTH: "client_credentials",
+    FHIR_TOKEN_URL: "https://issuer.example.com/am/oauth2/realms/root/realms/alpha/access_token",
+    FHIR_CLIENT_ID: "id",
+    FHIR_CLIENT_SECRET: "secret",
+  };
+
+  test("client_credentials requires a token URL, client ID and secret", () => {
+    assert.throws(() => parseConfig({ ...base, FHIR_AUTH: "client_credentials" }), /FHIR_TOKEN_URL is required/);
+    assert.throws(() => parseConfig({ ...clientCredentials, FHIR_CLIENT_SECRET: "" }), /FHIR_CLIENT_SECRET is required/);
+    assert.deepEqual(parseConfig(clientCredentials).fhir.auth, {
+      mode: "client_credentials",
+      tokenUrl: clientCredentials.FHIR_TOKEN_URL,
+      clientId: "id",
+      clientSecret: "secret",
+      scope: undefined,
+      authMethod: "client_secret_basic",
     });
-    assert.equal(config.fhir.auth.mode, "client_credentials");
+  });
+
+  test("scope and client_secret_post are passed through", () => {
+    const auth = parseConfig({
+      ...clientCredentials,
+      FHIR_SCOPE: "system/*.read",
+      FHIR_TOKEN_AUTH_METHOD: "client_secret_post",
+    }).fhir.auth;
+    assert.equal(auth.mode === "client_credentials" && auth.scope, "system/*.read");
+    assert.equal(auth.mode === "client_credentials" && auth.authMethod, "client_secret_post");
+    assert.throws(() => parseConfig({ ...clientCredentials, FHIR_TOKEN_AUTH_METHOD: "private_key_jwt" }), /FHIR_TOKEN_AUTH_METHOD/);
+  });
+
+  test("the token URL must be https unless on localhost", () => {
+    assert.throws(() => parseConfig({ ...clientCredentials, FHIR_TOKEN_URL: "http://issuer.example.com/token" }), /FHIR_TOKEN_URL must use https/);
+  });
+
+  test("the old PINGONE_* variables are rejected", () => {
+    assert.throws(() => parseConfig({ ...clientCredentials, PINGONE_ENV_ID: "env" }), /PINGONE_ENV_ID: is no longer read/);
   });
 });

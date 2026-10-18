@@ -21,7 +21,7 @@ before(async () => {
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const { port } = server.address() as AddressInfo;
 
-  for (const name of ["FHIR_AUTH", "PINGONE_ENV_ID", "PINGONE_CLIENT_ID", "PINGONE_CLIENT_SECRET"]) {
+  for (const name of ["FHIR_AUTH", "FHIR_TOKEN_URL", "FHIR_CLIENT_ID", "FHIR_CLIENT_SECRET", "FHIR_SCOPE"]) {
     delete process.env[name];
   }
   process.env.FHIR_BASE_URL = `http://127.0.0.1:${port}/fhir`;

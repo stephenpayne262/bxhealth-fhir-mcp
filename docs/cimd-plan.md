@@ -244,7 +244,8 @@ from Ping's documentation. Paths are in the AM native console.
 ## What CIMD does not fix
 
 CIMD changes **who the client is** and lets us pin the client's scopes. It
-doesn't change **what data a user can see**. With `FHIR_AUTH=none`, every
-authenticated user can read every patient on the FHIR server. Limiting that
-needs the planned token-exchange phase (RFC 8693), so FHIR sees the user, or
-patient-level checks in the server. That is a separate piece of work.
+doesn't change **what data a user can see**. That is handled separately by
+patient scoping (`MCP_PATIENT_SCOPED`, `src/patient-scope.ts`): the user's
+token carries their FHIR Patient id in the `patient` claim, and the server
+limits every tool call to that patient. The claim comes from the user's AIC
+identity, not from the CIMD document.
