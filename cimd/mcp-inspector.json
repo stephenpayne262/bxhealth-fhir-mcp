@@ -1,5 +1,5 @@
 {
-  "client_id": "https://CIMD_HOST/CIMD_PATH/mcp-inspector.json",
+  "client_id": "https://stephenpayne262.github.io/cimd/mcp-inspector.json",
   "client_name": "MCP Inspector (bxhealth-fhir-mcp)",
   "redirect_uris": [
     "http://127.0.0.1:6274/oauth/callback",
