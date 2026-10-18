@@ -221,6 +221,7 @@ claude mcp add --transport http --client-id https://<host>/<path>/claude-code.js
 ```
 
 For the MCP Inspector, put `https://<host>/<path>/mcp-inspector.json` in the
-client ID field. Then run [test-plan.md](test-plan.md), section D. After the
+client ID field. For Gemini CLI, use `https://<host>/<path>/gemini-cli.json`
+as `oauth.clientId` (settings in [`cimd/README.md`](../cimd/README.md#gemini-cli)). Then run [test-plan.md](test-plan.md), section D. After the
 cut-over, disable `fhir-mcp-public`, or at least reduce it to
 `fhir-mcp:read` and the redirect URIs still in use.

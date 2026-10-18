@@ -19,7 +19,32 @@ The URL a document is served from *is* the client's ID, so:
    ```
 
 The redirect URIs must match what each client sends exactly:
-Claude Code with `--callback-port 8765`, and the MCP Inspector on port 6274
-(the browser may use `127.0.0.1` or `localhost`, so both are listed). The
+Claude Code with `--callback-port 8765`, Gemini CLI with `redirectUri` set
+to port 7777 (it uses a random port otherwise), and the MCP Inspector on port
+6274 (the browser may use `127.0.0.1` or `localhost`, so both are listed). The
 `scope` here is informational: the AIC profile deny-lists `scope` and
 always grants its own.
+
+## Gemini CLI
+
+Add the server to `~/.gemini/settings.json`, then run `/mcp auth bxhealth-fhir`
+inside `gemini`:
+
+```json
+{
+  "mcpServers": {
+    "bxhealth-fhir": {
+      "httpUrl": "http://localhost:3000/mcp",
+      "oauth": {
+        "enabled": true,
+        "clientId": "https://stephenpayne262.github.io/cimd/gemini-cli.json",
+        "redirectUri": "http://localhost:7777/oauth/callback",
+        "scopes": ["fhir-mcp:read"]
+      }
+    }
+  }
+}
+```
+
+Tokens are stored in `~/.gemini/mcp-oauth-tokens.json`; delete the entry to
+force a new login.

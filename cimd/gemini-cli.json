@@ -1,0 +1,9 @@
+{
+  "client_id": "https://stephenpayne262.github.io/cimd/gemini-cli.json",
+  "client_name": "Gemini CLI (bxhealth-fhir-mcp)",
+  "redirect_uris": ["http://localhost:7777/oauth/callback"],
+  "grant_types": ["authorization_code"],
+  "response_types": ["code"],
+  "token_endpoint_auth_method": "none",
+  "scope": "fhir-mcp:read"
+}
