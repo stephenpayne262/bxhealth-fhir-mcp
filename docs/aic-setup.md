@@ -1,8 +1,15 @@
 # Authorization server setup: PingOne Advanced Identity Cloud
 
-This sets up a PingOne Advanced Identity Cloud (AIC) tenant to issue access
-tokens this MCP server accepts. It uses your own tenant and realm; nothing here
-depends on any other environment.
+This sets up a PingOne Advanced Identity Cloud (AIC) tenant for this MCP
+server. The tenant plays two roles:
+
+- **Inbound:** it issues the access tokens MCP clients present to this
+  server, on behalf of a signed-in member (sections 2-8).
+- **Outbound:** it issues the server's own system-level token for the FHIR
+  agent endpoint, by client credentials (section 9).
+
+It uses your own tenant and realm; nothing here depends on any other
+environment.
 
 What the server requires of a token (see [oauth-design.md](oauth-design.md)):
 
@@ -13,6 +20,7 @@ What the server requires of a token (see [oauth-design.md](oauth-design.md)):
 | `aud` | `MCP_PUBLIC_URL` (or contain it, if an array) |
 | `scope` | Includes `fhir-mcp:read` (or whatever `OAUTH_REQUIRED_SCOPES` lists) |
 | `sub`, `exp` | Present |
+| `patient` | The member's FHIR Patient id (`123`, `Patient/123` or an absolute `.../Patient/123`). Required while `MCP_PATIENT_SCOPED=true`, the default; the claim name is `OAUTH_PATIENT_CLAIM`. A token without it gets `403` |
 
 AIC's admin UI changes between releases, so the steps below name the settings
 rather than exact menu paths. Most of them live in the AM native console of
@@ -27,11 +35,9 @@ document and note the `issuer` value exactly:
 curl -s https://<tenant>.forgeblocks.com/am/oauth2/realms/root/realms/<realm>/.well-known/openid-configuration \
   | jq '{issuer, jwks_uri, authorization_endpoint, token_endpoint, code_challenge_methods_supported}'
 ```
-Our tenant is openam-scp-bx26 and our realm is /alpha
-
-https://openam-scp-bx26.forgeblocks.com/am/oauth2/realms/root/realms/alpha/.well-known/openid-configuration
-
-  "issuer": "https://openam-scp-bx26.forgeblocks.com:443/am/oauth2/realms/root/realms/alpha",
+For example, the `uhgc` tenant's `alpha` realm reports
+`"issuer": "https://openam-uhgc.forgeblocks.com:443/am/oauth2/realms/root/realms/alpha"`
+and `"token_endpoint": "https://openam-uhgc.forgeblocks.com:443/am/oauth2/realms/root/realms/alpha/access_token"`.
 
 AM reports the issuer with an explicit `:443`
 (`https://<tenant>.forgeblocks.com:443/am/oauth2/realms/root/realms/<realm>`).
@@ -53,29 +59,51 @@ the client below.
 - **Signing algorithm.** RS256 or ES256, matching `OAUTH_ALGORITHMS`.
 - **Lifetime.** 15 to 60 minutes. The server validates tokens statelessly, so
   a revoked token stays usable until it expires; short lifetimes limit that.
-- **Audience.** By default AM sets `aud` to the client ID, and it ignores the
-  RFC 8707 `resource` request parameter. Ping's MCP guidance is an **access
-  token modification script** that copies the requested `resource` into the
-  token (Scripts > New Script > OAuth2 Access Token Modification, then select
-  it on the OAuth2 Provider's Plugins tab). Ping's sample writes a claim named
-  `audience`, which leaves `aud` unchanged; this server checks `aud`, so write
-  `aud`, and only for resources you list:
+- **Audience and patient claim.** Both come from an **access token
+  modification script** (Scripts > New Script > OAuth2 Access Token
+  Modification, then select it on the OAuth2 Provider's Plugins tab).
+  - *Audience:* by default AM sets `aud` to the client ID, and it ignores the
+    RFC 8707 `resource` request parameter. Ping's MCP guidance is to copy the
+    requested `resource` into the token. Ping's sample writes a claim named
+    `audience`, which leaves `aud` unchanged; this server checks `aud`, so
+    write `aud`, and only for resources you list.
+  - *Patient:* put the member's FHIR Patient id in a `patient` claim. The
+    server takes the member's identity from this claim alone, so its source
+    must be one members can't change themselves.
 
-  ```javascript
-  (function () {
-    var allowed = ["http://localhost:3000/mcp"];
-    var params = requestProperties.get("requestParams");
-    var resource = params && params.get("resource");
-    if (resource && resource.size() > 0 && allowed.indexOf(String(resource.get(0))) !== -1) {
-      accessToken.setField("aud", String(resource.get(0)));
-    }
-  }());
-  ```
+  The script this deployment uses is
+  [aic-access-token-modification.js](aic-access-token-modification.js). It
+  also carries the SMART launch context for the patient-facing FHIR apps.
+  For MCP clients it:
 
-  Add each deployment's `MCP_PUBLIC_URL` to `allowed` (the Docker URL while
-  testing locally, the AWS URL later). Confirm the result by decoding a token
-  (step 6). If the server rejects a token for its audience, its log line shows
-  the `aud` (and any `audience`) the token carried.
+  - sets `aud` to the requested `resource` when it is in `allowedResources`.
+    Add each deployment's `MCP_PUBLIC_URL` there.
+  - sets `patient` from the `fhirid` property the login journey puts on the
+    session, falling back to the identity's `fr-attr-istr1`. Only the journey
+    should ever set `fhirid`, and only to the member's own id, because this
+    server trusts the claim completely.
+  - **ties MCP tokens to the member's AIC session.** A refresh for an MCP
+    resource without a live session has no `fhirid`, so the script refuses
+    it (`KillRefreshTokenNow`), and the client signs in again instead of
+    getting a token this server would answer with `403`. If AM never passes
+    a session on refresh, MCP refreshes always fail and members sign in
+    again when the access token expires. That is safe, just less convenient.
+
+  Test both paths after installing it:
+  1. Refresh while signed in to AIC: calls keep working.
+  2. Sign out of AIC in the browser, then wait for the access token to
+     expire: the refresh is refused, and the client asks you to sign in
+     again. It never gets a `403` from this server.
+
+  If the tenant already adds `patient` for another app, such as the
+  patient-facing FHIR app, make sure the script that runs for **this
+  server's clients** sets it as well. The OAuth2 Provider takes one access
+  token modification script, and a client's OAuth2 Provider Overrides can
+  replace it for that client. Whichever script the MCP clients get must set
+  both `aud` and `patient`. Decode a token to be sure (step 6).
+
+  If the server rejects a token for its audience, its log line shows the
+  `aud` (and any `audience`) the token carried.
 
   **Fallback if the audience cannot be changed:** set
   `OAUTH_AUDIENCE=fhir-mcp-public` (the client ID). Any token issued to that
@@ -106,11 +134,15 @@ Redirect URIs:
 
 ## 5. Test users
 
-Create two users:
+Create, or reuse, members whose patient attribute holds a FHIR Patient id
+that exists on the FHIR server:
 
-- one who can be granted `fhir-mcp:read` (the happy path), and
-- one who cannot, or a second client without the scope, to verify the `403
-  insufficient_scope` response.
+- **Two members with different patients.** Each should see only their own
+  data, and be refused when asking for the other's.
+- **One member without the patient attribute.** Their connection should get
+  a `403`, and the server logs `no usable "patient" claim`.
+- **One user who can't be granted `fhir-mcp:read`**, or a second client
+  without the scope, to check the `403 insufficient_scope` response.
 
 ## 6. Verify before connecting the MCP server (step 0 checklist)
 
@@ -129,6 +161,8 @@ one with the tenant alone:
 - [ ] **`iss`** in the token equals `OAUTH_ISSUER` exactly.
 - [ ] **`aud`** in the token equals `MCP_PUBLIC_URL` (or contains it).
 - [ ] **`scope`** contains `fhir-mcp:read`.
+- [ ] **`patient`** holds the member's FHIR Patient id, and the id exists on
+  the FHIR server.
 - [ ] **Redirect URIs** for each MCP client work (no `redirect_uri_mismatch`).
 - [ ] **PKCE** is enforced: an authorization request without
   `code_challenge` is refused.
@@ -137,12 +171,19 @@ Decode a token locally without sending it anywhere:
 
 ```bash
 TOKEN=...   # from the Inspector
-cut -d. -f2 <<<"$TOKEN" | tr '_-' '/+' | base64 -d 2>/dev/null | jq '{iss, aud, sub, scope, client_id, exp}'
+cut -d. -f2 <<<"$TOKEN" | tr '_-' '/+' | base64 -d 2>/dev/null | jq '{iss, aud, sub, scope, client_id, patient, exp}'
 ```
+
+MCP clients such as Claude Code don't show the token they hold. To check the
+claim from inside a session instead, ask for the member's own Patient record
+(a Patient search with no parameters). The server pins it to the claim's id,
+and the response's `self` link shows `_id=<that id>`.
 
 Do not paste production tokens into online JWT decoders.
 
 ## 7. Configure the MCP server
+
+In `.env` (see [`.env.example`](../.env.example) for every variable):
 
 ```bash
 MCP_PUBLIC_URL=http://localhost:3000/mcp
@@ -150,6 +191,18 @@ OAUTH_ISSUER=https://<tenant>.forgeblocks.com:443/am/oauth2/realms/root/realms/<
 OAUTH_REQUIRED_SCOPES=fhir-mcp:read
 OAUTH_CLIENT_MODE=public
 OAUTH_ALLOWED_CLIENT_IDS=fhir-mcp-public
+# Patient scoping is on by default; only set these to change them.
+# MCP_PATIENT_SCOPED=true
+# OAUTH_PATIENT_CLAIM=patient
+```
+
+For CIMD clients, use the client settings in section 8 instead. For the
+outbound FHIR token, add the settings in section 9. Then start the server
+in Docker and check it:
+
+```bash
+docker compose up -d --force-recreate
+curl -s localhost:3000/readyz   # oauth.state "ready" for this issuer
 ```
 
 Then run through [test-plan.md](test-plan.md), section B.
@@ -185,8 +238,10 @@ themselves: give each one the document URL as its client ID.
    If no profile matches a client ID, or more than one does, AIC returns
    `invalid_client`.
 4. **Set the profile's client defaults** (Core tab): **Scope(s)**
-   `fhir-mcp:read` only, authorization code grant only, token endpoint
-   authentication method `none`. With `scope` deny-listed, a document can't
+   `fhir-mcp:read` only, grant types authorization code and refresh token
+   (the token script limits refreshes to a live session; leave refresh token
+   out to make members sign in again whenever a token expires), token
+   endpoint authentication method `none`. With `scope` deny-listed, a document can't
    ask for more.
 5. **PKCE.** On the OAuth2 Provider, make sure **Code Verifier Parameter
    Required** covers public clients. CIMD clients using `none` are public.
@@ -204,7 +259,7 @@ themselves: give each one the document URL as its client ID.
    Unless something depends on it, turn off open dynamic client
    registration, so clients can't register their way around the profile.
 9. **Check one token** (as in step 6) from a CIMD login and record
-   `client_id`, `azp`, `aud` and `scope`. The server takes the client from
+   `client_id`, `azp`, `aud`, `scope` and `patient`. The server takes the client from
    `client_id`, falling back to `azp`, and needs it to be the document URL.
 
 Then configure the server and connect a client:
@@ -225,3 +280,51 @@ client ID field. For Gemini CLI, use `https://<host>/<path>/gemini-cli.json`
 as `oauth.clientId` (settings in [`cimd/README.md`](../cimd/README.md#gemini-cli)). Then run [test-plan.md](test-plan.md), section D. After the
 cut-over, disable `fhir-mcp-public`, or at least reduce it to
 `fhir-mcp:read` and the redirect URIs still in use.
+
+## 9. Client for the FHIR agent endpoint
+
+This server calls FHIR with its own token, never the member's (the MCP spec
+forbids passing the caller's token through). Smile CDR's agent endpoint
+(`/fhir-agent`) accepts only basic auth or a system-scoped client
+credentials token, so that token can read every patient. Patient scoping in
+this server (`MCP_PATIENT_SCOPED`, `src/patient-scope.ts`) is what keeps
+each member to their own records.
+
+1. **Create a confidential OAuth 2.0 client**, e.g. `fhir-mcp-agent`:
+
+   | Setting | Value |
+   | --- | --- |
+   | Client type | Confidential, with a client secret |
+   | Grant types | Client Credentials only |
+   | Token endpoint authentication method | `client_secret_basic` (the server's default), or `client_secret_post` with `FHIR_TOKEN_AUTH_METHOD=client_secret_post` |
+   | Scopes | The system scope the agent endpoint requires, e.g. `system/*.read`, and nothing else |
+   | Redirect URIs | None |
+
+   Read-only scopes are enough: patient scoping requires
+   `MCP_READ_ONLY=true`.
+2. **Make Smile CDR trust it.** The agent endpoint must accept tokens from
+   this issuer and map this client's system scope to read access. That is
+   configured in Smile CDR, not AIC.
+3. **Check the token.** Request one directly and decode it as in step 6.
+   It should have this client's `client_id`, the system scope, and no
+   `patient` claim:
+
+   ```bash
+   curl -s -u "fhir-mcp-agent:$SECRET" -d grant_type=client_credentials -d 'scope=system/*.read' \
+     https://<tenant>.forgeblocks.com:443/am/oauth2/realms/root/realms/<realm>/access_token | jq -r .access_token
+   ```
+4. **Configure the server:**
+
+   ```bash
+   FHIR_BASE_URL=https://<smile-host>/fhir-agent
+   FHIR_AUTH=client_credentials
+   FHIR_TOKEN_URL=https://<tenant>.forgeblocks.com:443/am/oauth2/realms/root/realms/<realm>/access_token
+   FHIR_CLIENT_ID=fhir-mcp-agent
+   FHIR_CLIENT_SECRET=...
+   FHIR_SCOPE=system/*.read
+   ```
+
+   After `docker compose up -d --force-recreate`, `/readyz` fetches the
+   FHIR CapabilityStatement with this token, so `fhir.versionMatches: true`
+   shows that the grant and the endpoint both work. If the token can't be
+   fetched, the server log has a `[fhir-auth]` line with AIC's error.
