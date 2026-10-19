@@ -12,6 +12,7 @@ COPY package.json package-lock.json ./
 RUN npm ci
 COPY tsconfig.json ./
 COPY src ./src
+COPY cimd ./cimd
 RUN npm run build
 
 # Not part of the default build: BuildKit skips stages the target doesn't need.
@@ -27,6 +28,7 @@ ENV PORT=3000
 COPY package.json package-lock.json ./
 RUN npm ci --omit=dev && npm cache clean --force
 COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/cimd ./cimd
 EXPOSE 3000
 # Numeric, not "node": Kubernetes verifies runAsNonRoot from the UID and
 # cannot resolve a user name inside the image.

@@ -20,8 +20,9 @@ OAUTH_CLIENT_MODE=cimd     # client IDs are HTTPS URLs of documents (OAUTH_CIMD_
 
 ## Who does what
 
-CIMD is an agreement between the **MCP client** and **AIC**. The MCP server is
-the resource server and never sees the document.
+CIMD is an agreement between the **MCP client** and **AIC**. The MCP server validates access tokens as the resource server and also hosts
+public client-document templates; AIC remains responsible for fetching and
+validating the documents.
 
 | Party | Public client | CIMD |
 | --- | --- | --- |
@@ -64,13 +65,15 @@ the resource server and never sees the document.
    loudly. A transition mode can be added if a gradual cut-over is needed.
 3. **Only canonical client ID URLs match** (`new URL(id).href === id`), so the
    string the server checks is the one AIC fetched.
-4. **The server doesn't host documents.** A document describes a client, so
-   it belongs with whoever runs the client, and AIC couldn't reach a
-   `localhost` server anyway.
-5. **Hosting:** GitHub Pages (`https://stephenpayne262.github.io/cimd/`) for
-   testing. The URL *is* the client's identity, so anything lasting should
-   move to a stable host, such as S3 and CloudFront next to the AWS
-   deployment; moving means new client IDs.
+4. **The server hosts four fixed documents.** They are public `/cimd/*.json`
+   routes, outside `/mcp` authentication. Each response's `client_id` is
+   derived from configured `MCP_PUBLIC_URL`, never incoming request headers.
+   The original templates and local callback URIs remain in `cimd/`.
+5. **Hosting:** the Kubernetes public HTTPS host replaces GitHub Pages for
+   deployed clients. Moving a document changes its client identity: update
+   both AIC's profile patterns and `OAUTH_CIMD_CLIENT_ID_PATTERNS`, then update
+   client configurations and sign in again. Localhost-hosted documents cannot
+   be fetched by AIC. See [deployment instructions](../infra/k8s/README.md).
 6. **Only documents we host are allowed.** Accepting a vendor's own document
    URL (once AIC advertises CIMD) would mean trusting the vendor's redirect
    URIs, and needs adding to both the AIC profile and

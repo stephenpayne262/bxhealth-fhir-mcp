@@ -1,7 +1,7 @@
 # bxhealth-fhir-mcp on the Ping SE DevOps cluster.
 #
 # Namespace is NOT hardcoded: select it first with
-#   kubens ping-devops-robpieper
+#   kubens ping-devops-stephenpayne
 # then
 #   kubectl apply -f infra/k8s/k8s.yaml
 #
@@ -12,11 +12,7 @@
 # cluster pulls anonymously. Making the package private again means
 # adding a docker-registry secret here and in the pod spec.
 #
-# There is deliberately NO Ingress here. This service is reachable only
-# from inside the cluster, at http://bxhealth-fhir-mcp, and only
-# PingGateway is meant to call it. An MCP server that is directly
-# reachable from the internet makes the whole gateway story theatre.
-# The public entrypoint arrives in Phase 4 as the gateway's own Ingress.
+# Public HTTPS access is configured separately in ingress.yml.
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -46,7 +42,7 @@ spec:
           # Tracks latest so a rollout restart ships updates without a
           # manifest edit; CI also pushes a git-sha tag for rollback and
           # sets the deployment to that sha on every deploy.
-          image: ghcr.io/robpieperping/bxhealth-fhir-mcp:latest
+          image: ghcr.io/stephenpayne262/bxhealth-fhir-mcp:latest
           imagePullPolicy: Always
           ports:
             - name: http
@@ -58,6 +54,12 @@ spec:
               value: "3000"
             - name: NODE_ENV
               value: "production"
+            - name: MCP_PUBLIC_URL
+              value: "https://bxhealth-fhir-mcp.ping-devops.com/mcp"
+            - name: MCP_READ_ONLY
+              value: "true"
+            - name: MCP_PATIENT_SCOPED
+              value: "true"
           envFrom:
             # FHIR_TOKEN_URL, FHIR_CLIENT_ID, FHIR_CLIENT_SECRET, FHIR_SCOPE,
             # FHIR_BASE_URL. The FHIR base URL is not a secret, but it

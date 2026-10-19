@@ -11,8 +11,8 @@ import { SignJWT, exportJWK, generateKeyPair, type CryptoKey, type JWK, type JWT
  * authorization server is involved.
  */
 
-const PUBLIC_URL = "http://localhost:3000/mcp";
-const METADATA_URL = "http://localhost:3000/.well-known/oauth-protected-resource/mcp";
+const PUBLIC_URL = "https://bxhealth-fhir-mcp.ping-devops.com/mcp";
+const METADATA_URL = "https://bxhealth-fhir-mcp.ping-devops.com/.well-known/oauth-protected-resource/mcp";
 const SCOPE = "fhir-mcp:read";
 const ALLOWED_ORIGIN = "http://allowed.example";
 
@@ -552,5 +552,30 @@ describe("issuer discovery", () => {
     await assert.rejects(verifier.verifyAccessToken(await mint()), /metadata is unavailable/);
     assert.equal(verifier.getStatus().state, "error");
     await assert.rejects(verifier.init(), /Could not fetch issuer metadata/);
+  });
+});
+
+describe("public CIMD documents", () => {
+  for (const name of ["claude-code", "gemini-cli", "mcp-inspector", "vscode"]) {
+    test(`${name} is public JSON with the configured client ID`, async () => {
+      const path = `/cimd/${name}.json`;
+      const response = await fetch(`${mcpBase}${path}`, {
+        redirect: "manual",
+        headers: { Host: "untrusted.example" },
+      });
+      assert.equal(response.status, 200);
+      assert.match(response.headers.get("content-type") ?? "", /application\/json/);
+      const body = await response.text();
+      assert.ok(Buffer.byteLength(body) <= 5 * 1024);
+      const document = JSON.parse(body);
+      assert.equal(document.client_id, new URL(path, PUBLIC_URL).href);
+      assert.equal(document.token_endpoint_auth_method, "none");
+      assert.ok(document.redirect_uris.length > 0);
+    });
+  }
+
+  test("unknown CIMD documents are not exposed", async () => {
+    const response = await fetch(`${mcpBase}/cimd/unknown.json`, { redirect: "manual" });
+    assert.equal(response.status, 404);
   });
 });

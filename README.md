@@ -258,6 +258,15 @@ the server is deployed.
 Sessions are held in memory, so the HTTP service is **single-replica** unless
 sticky sessions or a shared session store are added first.
 
+## App-hosted CIMD documents
+
+HTTP mode serves public JSON at `/cimd/claude-code.json`,
+`/cimd/gemini-cli.json`, `/cimd/mcp-inspector.json`, and `/cimd/vscode.json`.
+Each document's client ID uses the origin of `MCP_PUBLIC_URL`; no OAuth is
+required to fetch it. Use a public HTTPS host reachable by AIC, not localhost.
+Callback URIs remain on the client machine. See [cimd/README.md](cimd/README.md)
+and the [Kubernetes deployment guide](infra/k8s/README.md) for cutover steps.
+
 ## Tools
 
 Tools are listed with the MCP `readOnlyHint` annotation. With

@@ -4,7 +4,15 @@ Templates for the MCP clients used with this server in `OAUTH_CLIENT_MODE=cimd`
 (see [../docs/cimd-plan.md](../docs/cimd-plan.md) and
 [../docs/aic-setup.md](../docs/aic-setup.md#8-cimd-clients)).
 
-These files are the copies published at
+The HTTP app serves all four templates at `/cimd/claude-code.json`,
+`/cimd/gemini-cli.json`, `/cimd/mcp-inspector.json`, and `/cimd/vscode.json`.
+Each response replaces `client_id` with the document path on the origin of
+`MCP_PUBLIC_URL`. Only these four documents are exposed, not this directory.
+For the Kubernetes deployment, see [the deployment guide](../infra/k8s/README.md).
+Local HTTP URLs are useful for checking responses but cannot be fetched by
+AIC as CIMD client IDs; use public HTTPS for authentication.
+
+These source templates retain the client IDs previously published at
 `https://stephenpayne262.github.io/cimd/`; keep the two in sync. The URL a
 document is served from *is* the client's ID, so to host them elsewhere:
 
@@ -51,3 +59,13 @@ inside `gemini`:
 
 Tokens are stored in `~/.gemini/mcp-oauth-tokens.json`; delete the entry to
 force a new login.
+
+## Visual Studio Code
+
+Use the document URL as the client ID and leave the client secret blank.
+AIC does not currently advertise CIMD in discovery. VS Code may attempt DCR
+first; its **Copy URIs & Proceed** dialog allows manual client ID entry.
+The template's `http://127.0.0.1/` redirect is not verified against AIC's
+matching rules. Before login, compare the actual VS Code callback (including
+port and path) with the document and any profile overrides. Do not assume
+that a portless loopback URI permits every port in AIC.

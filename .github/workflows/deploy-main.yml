@@ -118,9 +118,14 @@ jobs:
         env:
           SHA_SHORT: ${{ needs.build-and-push.outputs.sha_short }}
         run: |
+          if [ "$K8S_NAMESPACE" != "ping-devops-stephenpayne" ]; then
+            echo "K8S_NAMESPACE must be ping-devops-stephenpayne to match ingress.yml" >&2
+            exit 1
+          fi
           sed "s|image: ${IMAGE}:latest|image: ${IMAGE}:${SHA_SHORT}|" infra/k8s/k8s.yaml > "$RUNNER_TEMP/k8s.yaml"
           grep -q "image: ${IMAGE}:${SHA_SHORT}" "$RUNNER_TEMP/k8s.yaml"
           kubectl apply -n "$K8S_NAMESPACE" -f "$RUNNER_TEMP/k8s.yaml"
+          kubectl apply -f infra/k8s/ingress.yml
 
       - name: Wait for rollout
         run: kubectl rollout status -n "$K8S_NAMESPACE" deployment/${K8S_DEPLOYMENT} --timeout=180s

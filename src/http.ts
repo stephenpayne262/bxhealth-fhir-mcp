@@ -1,4 +1,6 @@
 import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import express, { type Request, type Response } from "express";
 import { requireBearerAuth } from "@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js";
 import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
@@ -100,6 +102,16 @@ export function buildApp(options: AppOptions = {}): express.Express {
   // auth: kubelet probes must not depend on either.
   app.get("/healthz", healthz);
   app.get("/readyz", readyzHandler(() => verifier.getStatus()));
+
+  for (const name of ["claude-code", "gemini-cli", "mcp-inspector", "vscode"]) {
+    const path = `/cimd/${name}.json`;
+    const template: unknown = JSON.parse(readFileSync(join(__dirname, "../cimd", `${name}.json`), "utf8"));
+    if (!template || typeof template !== "object" || Array.isArray(template)) {
+      throw new Error(`Invalid CIMD document: ${name}.json`);
+    }
+    const document = { ...template, client_id: new URL(path, publicUrl).href };
+    app.get(path, (_req, res) => res.json(document));
+  }
 
   // Protected Resource Metadata is public: it is how an unauthenticated
   // client learns where to log in. Served at the RFC 9728 path for /mcp and

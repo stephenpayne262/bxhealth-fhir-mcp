@@ -8,7 +8,7 @@
 # and a smaller blast radius than exporting a personal identity.
 #
 # Apply once, into the target namespace:
-#   kubectl apply -n ping-devops-robpieper -f infra/k8s/ci-rbac.yaml
+#   kubectl apply -n ping-devops-stephenpayne -f infra/k8s/ci-rbac.yaml
 #
 # Then build the kubeconfig CI uses from the token in the Secret below;
 # see infra/k8s/README.md.
