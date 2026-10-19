@@ -1,18 +1,22 @@
-# OAuth design (phase 1)
+# OAuth design
 
-Phase 1 makes the MCP server an OAuth 2.1 resource server: every HTTP call to
-`/mcp` needs a valid access token from the configured authorization server,
-and MCP clients log the user in through the browser when they don't have one.
-Tools are read-only in this phase.
+The MCP server is an OAuth 2.1 resource server: every HTTP call to `/mcp`
+needs a valid access token from the configured authorization server, and MCP
+clients log the user in through the browser when they don't have one. Tools
+are read-only.
 
-Built since phase 1:
+What is built:
 
-- **OAuth from the MCP server to FHIR.** `FHIR_AUTH=client_credentials` gets
-  the server's own system-level token (aic-setup.md, section 9).
-- **Patient scoping.** Each member is limited to their own records; see
+- **Inbound OAuth:** token validation, the 401 challenge and Protected
+  Resource Metadata, session binding and the audit log.
+- **Client checks:** pre-registered clients or Client ID Metadata Documents
+  (`OAUTH_CLIENT_MODE`; [cimd-plan.md](cimd-plan.md)).
+- **Patient scoping:** each member is limited to their own records; see
   "Patient scoping" below.
+- **OAuth from the MCP server to FHIR:** `FHIR_AUTH=client_credentials` gets
+  the server's own system-level token (aic-setup.md, section 9).
 
-Later phases, not built yet:
+Not built yet:
 
 - **Token exchange (RFC 8693)** for a delegated token, so FHIR sees the user
   rather than the server. Smile CDR's agent endpoint accepts only system
@@ -69,10 +73,14 @@ MCP client                 MCP server                       AIC (issuer)
 | `src/config-schema.ts` | Parses and validates the environment (Zod). Applies the fail-closed rules: HTTP requires the OAuth settings, URLs must be `https` except on localhost, and `none`/`HS*` algorithms are refused |
 | `src/oauth/discovery.ts` | Fetches issuer metadata (OpenID form, then RFC 8414) and requires an exact `issuer` match |
 | `src/oauth/verifier.ts` | Implements the SDK's `OAuthTokenVerifier` with `jose`: remote JWKS with caching, refetch on an unknown `kid` (rate-limited), and the claim checks. Errors returned to clients are generic; details go to the server log |
+| `src/oauth/client-policy.ts` | Whether the token's `client_id` is allowed: an exact list in `public` mode, canonical URLs matching the patterns in `cimd` mode |
+| `src/oauth/patient-claim.ts` | Reads the caller's Patient id from the `patient` claim |
 | `src/oauth/metadata.ts` | Protected Resource Metadata document and URL |
 | `src/origin.ts` | `Origin` validation (DNS-rebinding protection) and CORS for allowed browser origins |
 | `src/http.ts` | Wiring: public routes, then the origin check, then the SDK's `requireBearerAuth` on every `/mcp` method. Sessions are bound to their owner |
-| `src/server.ts` | Read-only filtering, the `readOnlyHint` annotation, and the per-call audit log (using the SDK's `extra.authInfo`) |
+| `src/server.ts` | Read-only and patient-scope tool filtering, the `readOnlyHint` annotation, and the per-call audit log (using the SDK's `extra.authInfo`) |
+| `src/patient-scope.ts` | Limits every search, read and `$everything` to the caller's Patient, and filters the results |
+| `src/auth.ts`, `src/fhir-client.ts` | The server's own client_credentials token for FHIR, and the FHIR HTTP client (validated paths, one retry on `401`) |
 
 ## Decisions
 
@@ -141,7 +149,8 @@ token without one with `403`. `src/patient-scope.ts` then:
 - refuses `_revinclude`, `_has`, `_contained`, `_filter` and `_query`;
 - drops any returned resource that doesn't reference the caller's Patient,
   which also covers `_include`, `$everything`, and a FHIR server that
-  ignores the forced parameter;
+  ignores the forced parameter. `_elements` and `_summary=text` are applied
+  by the server after this check, since they could remove the reference;
 - hides the tools it can't limit (patient search, vread, history, writes).
   Patient scoping requires `MCP_READ_ONLY=true`.
 
@@ -151,7 +160,7 @@ CDR rejects unknown search parameters with `400`.
 **What is never logged:** raw tokens and tool arguments. Arguments can contain
 names, identifiers and other patient data.
 
-## Limitations in phase 1
+## Limitations
 
 - Revocation is not detected before `exp` (see above).
 - Sessions live in memory, so the service runs as a single replica.

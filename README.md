@@ -18,7 +18,9 @@ for the user automatically.
 - [Testing](#testing)
 - Further reading: [docs/oauth-design.md](docs/oauth-design.md) (design and decisions),
   [docs/aic-setup.md](docs/aic-setup.md) (authorization server setup),
-  [docs/test-plan.md](docs/test-plan.md) (automated and manual test plan)
+  [docs/test-plan.md](docs/test-plan.md) (automated and manual test plan),
+  [docs/cimd-plan.md](docs/cimd-plan.md) and [cimd/](cimd/README.md) (Client ID
+  Metadata Documents)
 
 ## How authentication works
 
@@ -32,7 +34,8 @@ user's password.
 3. The client reads that metadata (RFC 9728), which names the authorization
    server (`OAUTH_ISSUER`).
 4. The client opens the user's browser for an authorization code login with
-   PKCE, using a pre-registered public OAuth client.
+   PKCE. Its client ID is either a pre-registered public client or the HTTPS
+   URL of a Client ID Metadata Document (`OAUTH_CLIENT_MODE`).
 5. The authorization server issues a JWT access token whose `aud` is this
    server's `MCP_PUBLIC_URL` and whose scope includes `fhir-mcp:read`.
 6. The client retries with `Authorization: Bearer <token>` and keeps sending it
@@ -40,11 +43,12 @@ user's password.
 
 On every request (POST, GET and DELETE on `/mcp`) the server checks the token's
 signature against the issuer's JWKS, the algorithm (`OAUTH_ALGORITHMS`), the
-issuer (exact match), the audience, `exp`/`nbf`, `sub`, and the required scopes.
+issuer (exact match), the audience, `exp`/`nbf`, `sub`, the required scopes,
+and that the token's `client_id` (or `azp`) is allowed by `OAUTH_CLIENT_MODE`.
 
 | Result | Response |
 | --- | --- |
-| No token, malformed, bad signature, wrong issuer/audience, expired | `401`, `error="invalid_token"` plus `resource_metadata` |
+| No token, malformed, bad signature, wrong issuer/audience, expired, client not allowed | `401`, `error="invalid_token"` plus `resource_metadata` |
 | Valid token without the required scope | `403`, `error="insufficient_scope"` |
 | Valid token without a usable `patient` claim (patient scoping on) | `403`, `error="insufficient_scope"` |
 | Browser request from an origin not in `MCP_ALLOWED_ORIGINS` | `403` |
@@ -108,6 +112,9 @@ take precedence. `.env` is gitignored; never commit real credentials.
 | `MCP_PUBLIC_URL` | required | The URL clients use to reach `/mcp`, e.g. `http://localhost:3000/mcp` or `https://fhir-mcp.example.com/mcp`. This is the OAuth resource identifier. Set it explicitly behind a load balancer; it is never derived from request headers |
 | `OAUTH_ISSUER` | required | The authorization server's issuer, **exactly** as it appears in the token's `iss` claim. AIC includes `:443`, e.g. `https://<tenant>.forgeblocks.com:443/am/oauth2/realms/root/realms/alpha` |
 | `OAUTH_REQUIRED_SCOPES` | `fhir-mcp:read` | Space-separated scopes every token must carry |
+| `OAUTH_CLIENT_MODE` | `public` | Which clients' tokens are accepted. `public`: pre-registered client IDs. `cimd`: client IDs that are HTTPS URLs of Client ID Metadata Documents ([docs/aic-setup.md](docs/aic-setup.md), section 8). Setting the other mode's variable is a startup error |
+| `OAUTH_ALLOWED_CLIENT_IDS` | none | `public` mode only. Comma-separated client IDs, e.g. `fhir-mcp-public`. If empty, any client of the issuer is accepted, with a startup warning |
+| `OAUTH_CIMD_CLIENT_ID_PATTERNS` | required in `cimd` mode | Comma-separated document URLs: an exact URL, or a prefix ending in `/*`, e.g. `https://example.github.io/cimd/*`. Use the same patterns as the AIC CIMD profile |
 | `OAUTH_AUDIENCE` | `MCP_PUBLIC_URL` | Value that must appear in the token's `aud`. Override only as a temporary workaround; see [docs/aic-setup.md](docs/aic-setup.md) |
 | `OAUTH_JWKS_URI` | from discovery | Override for the issuer's JWKS URL |
 | `OAUTH_ALGORITHMS` | `RS256,ES256` | Accepted signing algorithms. `none` and `HS*` are always refused |
@@ -140,7 +147,12 @@ docker build -f infra/Dockerfile --target check .   # typecheck and tests
 After changing only `.env`, run `docker compose up -d --force-recreate`; the
 container reads `.env` when it is created. Inside the container `localhost`
 is the container itself: reach services on the host at
-`host.docker.internal`.
+`host.docker.internal`. Without Compose:
+
+```bash
+docker build -f infra/Dockerfile -t bxhealth-fhir-mcp .
+docker run --rm -p 3000:3000 --env-file .env bxhealth-fhir-mcp
+```
 
 Without Docker, Node.js 22.12 or later is required:
 
@@ -153,12 +165,8 @@ npm run dev          # stdio, live TypeScript
 npm run dev:http     # HTTP, live TypeScript
 ```
 
-Docker:
-
-```bash
-docker build -f infra/Dockerfile -t bxhealth-fhir-mcp .
-docker run --rm -p 3000:3000 --env-file .env bxhealth-fhir-mcp
-```
+`.env` is read the same way in both cases: `#` starts a comment line, or an
+inline comment after whitespace, and quoted values keep a `#`.
 
 The image defaults to `MCP_TRANSPORT=http` and runs as UID 1000. For Docker on
 your machine, `MCP_PUBLIC_URL=http://localhost:3000/mcp` (match the published
@@ -173,9 +181,12 @@ curl -si -X POST localhost:3000/mcp -H 'Content-Type: application/json' -d '{}' 
 
 ## Connect an MCP client
 
-Before connecting, the authorization server needs a public OAuth client for
-MCP clients and must issue tokens with the right audience and scope; see
-[docs/aic-setup.md](docs/aic-setup.md).
+Before connecting, the authorization server must issue tokens with the right
+audience, scope and `patient` claim, and accept the client: a pre-registered
+public client, or a CIMD profile; see [docs/aic-setup.md](docs/aic-setup.md).
+The tenant's Content Security Policy must also allow each client's local
+callback, or the browser stays on the consent page after **Allow**
+([docs/aic-setup.md](docs/aic-setup.md), section 8, step 10).
 
 ### MCP Inspector
 
@@ -184,8 +195,9 @@ npx @modelcontextprotocol/inspector
 ```
 
 Choose **Streamable HTTP**, URL `http://localhost:3000/mcp`. In the
-authentication settings enter the public client ID and scope
-`openid fhir-mcp:read`, then connect. The Inspector opens the browser for the
+authentication settings enter the client ID (the public client, or in `cimd`
+mode the URL of `mcp-inspector.json`) and scope `openid fhir-mcp:read`, then
+connect. The Inspector opens the browser for the
 AIC login and returns with a token. Its callback URL
 (`http://localhost:6274/oauth/callback` by default) must be registered on the
 client. If you use the Inspector's direct (browser) connection mode instead of
@@ -194,15 +206,21 @@ its proxy, add its origin to `MCP_ALLOWED_ORIGINS`, e.g.
 
 ### Claude Code
 
+In `cimd` mode, give Claude Code the document URL as its client ID and the
+callback port the document lists (`http://localhost:8765/callback`):
+
 ```bash
-claude mcp add --transport http bxhealth-fhir http://localhost:3000/mcp
+claude mcp add --transport http \
+  --client-id https://<host>/<path>/claude-code.json \
+  --callback-port 8765 \
+  bxhealth-fhir http://localhost:3000/mcp
 ```
 
-Then run `/mcp` in Claude Code and choose to authenticate; the browser opens
-for the login. Because the client is pre-registered, Claude Code needs its
-client ID and a callback URL registered on that client; check
-`claude mcp add --help` for the client ID and callback port options in your
-version.
+In `public` mode, use the pre-registered client ID instead, with
+`http://localhost:8765/callback` registered on that client. Then run `/mcp`
+in Claude Code, select the server and choose **Authenticate**; the browser
+opens for the login. New servers appear in `/mcp` only in sessions started
+after `claude mcp add`.
 
 ### Claude Desktop and claude.ai
 

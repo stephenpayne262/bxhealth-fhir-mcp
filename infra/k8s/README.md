@@ -71,10 +71,11 @@ kubectl create secret generic bxhealth-fhir-mcp-secrets -n ping-devops-robpieper
   --from-env-file=.env
 ```
 
-Carries `FHIR_TOKEN_URL`, `FHIR_CLIENT_ID`, `FHIR_CLIENT_SECRET`, `FHIR_SCOPE`,
-`FHIR_BASE_URL`. The FHIR base URL is not secret but lives here so there
-is one place to change it. The CI ServiceAccount deliberately cannot
-read this secret.
+Carries the whole `.env`: the `FHIR_*` settings (including
+`FHIR_CLIENT_SECRET`), `MCP_PUBLIC_URL` and the `OAUTH_*` settings, among
+them `OAUTH_CLIENT_MODE` and its client list or patterns. Only the secret
+needs to be here, but keeping all of it in one place means one place to
+change it. The CI ServiceAccount deliberately cannot read this secret.
 
 ### 3. Container image
 

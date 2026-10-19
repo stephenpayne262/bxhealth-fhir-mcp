@@ -2,7 +2,7 @@
   "client_id": "https://stephenpayne262.github.io/cimd/claude-code.json",
   "client_name": "Claude Code (bxhealth-fhir-mcp)",
   "redirect_uris": ["http://localhost:8765/callback"],
-  "grant_types": ["authorization_code"],
+  "grant_types": ["authorization_code", "refresh_token"],
   "response_types": ["code"],
   "token_endpoint_auth_method": "none",
   "scope": "fhir-mcp:read"

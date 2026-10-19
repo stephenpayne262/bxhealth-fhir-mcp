@@ -81,7 +81,10 @@ the client below.
   - sets `patient` from the `fhirid` property the login journey puts on the
     session, falling back to the identity's `fr-attr-istr1`. Only the journey
     should ever set `fhirid`, and only to the member's own id, because this
-    server trusts the claim completely.
+    server trusts the claim completely. For the same reason, check that
+    members can't edit `fr-attr-istr1` (the user schema property
+    `frIndexedString1`): it must not be marked user editable, and no
+    end-user journey or account page may set it.
   - **ties MCP tokens to the member's AIC session.** A refresh for an MCP
     resource without a live session has no `fhirid`, so the script refuses
     it (`KillRefreshTokenNow`), and the client signs in again instead of
@@ -127,10 +130,12 @@ Redirect URIs:
 
 - **MCP Inspector:** `http://localhost:6274/oauth/callback` (and
   `http://localhost:6274/oauth/callback/debug` for its debug flow).
-- **Claude Code:** a loopback callback on `localhost`. AM matches redirect
-  URIs exactly, so if your Claude Code version picks a random port, use its
-  option to fix the callback port and register that URI. See
-  `claude mcp add --help`.
+- **Claude Code:** `http://localhost:8765/callback`, with
+  `claude mcp add ... --callback-port 8765`. Without that option Claude Code
+  picks a random port, which AM's exact redirect URI match refuses.
+
+Each callback origin must also be allowed by the tenant's Content Security
+Policy (section 8, step 10).
 
 ## 5. Test users
 
@@ -261,6 +266,22 @@ themselves: give each one the document URL as its client ID.
 9. **Check one token** (as in step 6) from a CIMD login and record
    `client_id`, `azp`, `aud`, `scope` and `patient`. The server takes the client from
    `client_id`, falling back to `azp`, and needs it to be the document URL.
+10. **Content Security Policy.** The hosted login pages send a CSP whose
+    `form-action` directive also applies to the redirect after the consent
+    form is submitted. Add the origin of every local callback to the
+    tenant's CSP `form-action`: `http://localhost:8765` (Claude Code),
+    `http://localhost:6274` and `http://127.0.0.1:6274` (MCP Inspector), and
+    `http://localhost:7777` (Gemini CLI). In the admin console, go to
+    **Tenant Settings > Global Settings > Content Security Policy >
+    Enforced Policy**, edit `form-action`, add the origins (no path), save,
+    then click **Publish**. Changes take a few minutes. The policy covers
+    both realms, so add sources without removing any.
+
+    If an origin is missing, AIC still returns a 302 to the callback with a
+    valid `code`, but the browser refuses to follow it: the consent page
+    stays on screen after **Allow**, and the browser console shows a
+    `form-action` CSP violation. This applies to the public client in
+    section 4 too.
 
 Then configure the server and connect a client:
 

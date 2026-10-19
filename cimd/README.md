@@ -4,10 +4,11 @@ Templates for the MCP clients used with this server in `OAUTH_CLIENT_MODE=cimd`
 (see [../docs/cimd-plan.md](../docs/cimd-plan.md) and
 [../docs/aic-setup.md](../docs/aic-setup.md#8-cimd-clients)).
 
-The URL a document is served from *is* the client's ID, so:
+These files are the copies published at
+`https://stephenpayne262.github.io/cimd/`; keep the two in sync. The URL a
+document is served from *is* the client's ID, so to host them elsewhere:
 
-1. Replace `https://CIMD_HOST/CIMD_PATH/` in each `client_id` with the exact
-   URL the file will be served from.
+1. Set each `client_id` to the exact URL the file will be served from.
 2. Publish the files on public HTTPS. AIC must be able to fetch them (no
    localhost or private addresses), with a `200` (no redirects) and at most
    5 KB each.
@@ -21,9 +22,11 @@ The URL a document is served from *is* the client's ID, so:
 The redirect URIs must match what each client sends exactly:
 Claude Code with `--callback-port 8765`, Gemini CLI with `redirectUri` set
 to port 7777 (it uses a random port otherwise), and the MCP Inspector on port
-6274 (the browser may use `127.0.0.1` or `localhost`, so both are listed). The
-`scope` here is informational: the AIC profile deny-lists `scope` and
-always grants its own.
+6274 (the browser may use `127.0.0.1` or `localhost`, so both are listed).
+Each callback origin must also be in the tenant CSP's `form-action`
+([aic-setup.md](../docs/aic-setup.md#8-cimd-clients), step 10). `scope` and
+`grant_types` here are informational: the AIC profile deny-lists them and
+always applies its own.
 
 ## Gemini CLI
 

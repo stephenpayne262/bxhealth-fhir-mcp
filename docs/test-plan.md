@@ -1,11 +1,11 @@
-# Test plan: OAuth phase 1
+# Test plan
 
-Phase 1 is done when:
+A change is done when:
 
 - all of section A passes in CI,
-- every step of section B passes with MCP Inspector and Claude Code against
-  your AIC tenant, and
-- read-only tools return live FHIR data only when a valid token is presented.
+- the sections of B to D it touches pass against your AIC tenant, and
+- read-only tools return live FHIR data only when a valid token is presented,
+  and only the signed-in member's.
 
 ## A. Automated tests (`npm test`)
 
@@ -32,9 +32,9 @@ them on every push. `test/oauth.test.ts` starts:
 | Origin | Disallowed origin → 403 before auth. Allowed origin preflight → 204 with CORS headers, which also appear on the 401 | `oauth.test.ts` |
 | Logging | Audit line has `sub`, `client_id`, tool and outcome. The raw token, its signature and the tool arguments never appear in logs | `oauth.test.ts` |
 | Issuer discovery | Mismatched issuer is a permanent error, reported on status and never retried. Unreachable issuer is reported, then retried | `oauth.test.ts` |
-| Configuration | HTTP refuses to start without `MCP_PUBLIC_URL`/`OAUTH_ISSUER`. `http://` is refused except for localhost. Fragments and relative URLs refused. `none`/`HS256` refused. Defaults and overrides. `MCP_READ_ONLY` parsing. `client_credentials` requires `FHIR_TOKEN_URL`/`FHIR_CLIENT_ID`/`FHIR_CLIENT_SECRET`; old `PINGONE_*` rejected. Patient scoping on by default and needs read-only | `config.test.ts` |
+| Configuration | `.env` comments and quotes read as Docker Compose reads them. HTTP refuses to start without `MCP_PUBLIC_URL`/`OAUTH_ISSUER`. `http://` is refused except for localhost. Fragments and relative URLs refused. `none`/`HS256` refused. Defaults and overrides. `MCP_READ_ONLY` parsing. `client_credentials` requires `FHIR_TOKEN_URL`/`FHIR_CLIENT_ID`/`FHIR_CLIENT_SECRET`; old `PINGONE_*` rejected. Patient scoping on by default and needs read-only | `config.test.ts` |
 | FHIR client | Repeated array parameters, path validation, `$operation` paths, client_credentials request (grant, scope, Basic credentials), one shared token fetch, 401 retry once, no retry loop | `fhir-client.test.ts` |
-| Patient scoping | Unscopable tools hidden. Searches and reads get `patient=Patient/{id}` forced on. Patient pinned to own id. Shared types pass, others refused. `_revinclude`/`_has`/`_contained`/`_filter` refused. Resources not referencing the caller (including via `contained` only, or `Patient/p10` vs `p1`) filtered out of searches, reads and `$everything`. Pass-through without a patient | `patient-scope.test.ts` |
+| Patient scoping | Unscopable tools hidden. Searches and reads get `patient=Patient/{id}` forced on. Patient pinned to own id. Shared types pass, others refused. `_revinclude`/`_has`/`_contained`/`_filter`/`_query` refused. `_elements` and `_summary=text` applied after the filter, so the caller's resources keep their entries. Resources not referencing the caller (including via `contained` only, or `Patient/p10` vs `p1`) filtered out of searches, reads and `$everything`. Pass-through without a patient | `patient-scope.test.ts` |
 | Patient claim | Bare id, `Patient/id` and absolute references accepted; other types, invalid ids and non-strings refused; missing claim is 403 | `patient-claim.test.ts`, `oauth.test.ts` |
 | FHIR auth none | No token request and no `Authorization` header | `fhir-auth-none.test.ts` |
 
@@ -106,8 +106,8 @@ profile's pattern.
 | --- | --- | --- |
 | D1 | The `curl` check in [cimd/README.md](../cimd/README.md), for each document | `200`, no redirect, at most 5 KB, `client_id` equals the URL |
 | D2 | Start the server | Log line `client mode cimd; client ID patterns: ...`. `/readyz` has `"clientMode": "cimd"` |
-| D3 | Connect the Inspector with the document URL as client ID, then decode the token | Consent shows the client. `client_id` (or `azp`) is the document URL, `aud` = `MCP_PUBLIC_URL`, `scope` is only `fhir-mcp:read` |
-| D4 | `claude mcp add ... --client-id <claude-code.json URL> --callback-port 8765`, then `/mcp` > Authenticate, then a FHIR search | Tools work. The audit line's `client_id` is the document URL |
+| D3 | Connect the Inspector with the document URL as client ID, then decode the token | Consent shows the profile's fixed name. After **Allow** the browser goes on to the callback by itself (if it stays on the consent page, the tenant CSP is missing the callback origin). `client_id` (or `azp`) is the document URL, `aud` = `MCP_PUBLIC_URL`, `scope` is only `fhir-mcp:read` |
+| D4 | `claude mcp add ... --client-id <claude-code.json URL> --callback-port 8765`, then `/mcp` > Authenticate, then a FHIR search | Consent moves on after **Allow**, as in D3. Tools work. The audit line's `client_id` is the document URL |
 | D5 | Use a client ID URL outside the profile's pattern | AIC refuses with `invalid_client` before the login page |
 | D6 | Use a `redirect_uri` not in the document (e.g. a different callback port) | AIC refuses the authorization request |
 | D7 | Host a copy of a document whose `client_id` differs from its URL | AIC refuses the client |
