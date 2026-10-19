@@ -155,6 +155,12 @@ The public GHCR package must be pullable before the first successful rollout.
 ## Deploy
 
 Push to `main`; the workflow runs `check` → `build-and-push` → `deploy`.
+Manual workflow runs default to build-and-publish only. Enable the `deploy`
+input explicitly to deploy a manual run. To publish a branch without deploying:
+
+```bash
+gh workflow run deploy-main.yml --ref PayneUpdate-cimd -f deploy=false
+```
 Manually:
 
 ```bash
