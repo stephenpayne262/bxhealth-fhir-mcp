@@ -6,7 +6,8 @@ import { config } from "./config.js";
  *
  * This is the server's own identity, not the MCP caller's: the caller's
  * token is never forwarded to FHIR (the MCP spec forbids token passthrough).
- * Delegated access is a later phase, via token exchange.
+ * Smile CDR's agent endpoint accepts only system tokens, so each member is
+ * limited to their own records by patient-scope.ts instead.
  */
 
 interface TokenResponse {

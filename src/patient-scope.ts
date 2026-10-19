@@ -4,6 +4,7 @@ import {
   readResource,
   searchResource,
 } from "./fhir-client.js";
+import { FHIR_ID } from "./fhir-id.js";
 
 /**
  * Limits tool calls to one patient's data (MCP_PATIENT_SCOPED).
@@ -29,7 +30,9 @@ import {
  * - Every result is checked as well: a patient-data resource is returned
  *   only if it references the caller's Patient, and any other Patient is
  *   dropped. This covers `_include`, `$everything`, and a FHIR server that
- *   ignored the forced parameter.
+ *   ignored the forced parameter. `_elements` and `_summary=text` are
+ *   applied here after that check, since they could remove the reference
+ *   it looks for.
  */
 
 /**
@@ -67,7 +70,6 @@ const REFUSED_PARAM = /^_(revinclude|contained|has|filter|query)/;
 // refused rather than silently replaced: the caller would otherwise read
 // their own data as if it were the other patient's.
 const PATIENT_REFERENCE_PARAM = /^(patient|subject|beneficiary)(:Patient)?$/;
-const FHIR_ID = /^[A-Za-z0-9\-.]{1,64}$/;
 
 class PatientScopeError extends Error {}
 
@@ -98,22 +100,36 @@ export async function scopedSearch(scope: string | undefined, opts: FhirSearchPa
     }
   }
 
+  // `_elements` and `_summary=text` can strip the reference the result
+  // filter needs, which would drop every entry. Fetch whole resources and
+  // trim them here, after the filter.
+  const { _elements, _summary, ...searchParams } = opts.searchParams ?? {};
+  const summary = opts.summary ?? [_summary].flat()[0];
+  const elements =
+    summary === "text" ? ["text"] : [opts.elements ?? [], _elements ?? []].flat().flatMap((e) => e.split(","));
+  const request: FhirSearchParams = {
+    ...opts,
+    searchParams,
+    elements: undefined,
+    summary: summary === "text" ? undefined : (summary as FhirSearchParams["summary"]),
+  };
+
   const { resourceType } = opts;
   let result: unknown;
   if (resourceType === "Patient") {
-    const requested = opts.searchParams?._id;
+    const requested = searchParams._id;
     for (const id of [requested ?? []].flat().flatMap((v) => v.split(","))) {
       if (id !== scope) refuse(`Patient "${id}" is not you.`);
     }
-    result = await searchResource({ ...opts, searchParams: { ...opts.searchParams, _id: scope } });
+    result = await searchResource({ ...request, searchParams: { ...searchParams, _id: scope } });
   } else if (PATIENT_TYPES.has(resourceType)) {
-    result = await searchResource({ ...opts, searchParams: { ...opts.searchParams, patient: `Patient/${scope}` } });
+    result = await searchResource({ ...request, searchParams: { ...searchParams, patient: `Patient/${scope}` } });
   } else if (SHARED_TYPES.has(resourceType)) {
-    result = await searchResource(opts);
+    result = await searchResource(request);
   } else {
     refuse(`${resourceType} resources are not available.`);
   }
-  return filterBundle(result, scope);
+  return selectElements(filterBundle(result, scope), elements);
 }
 
 export async function scopedRead(scope: string | undefined, resourceType: string, id: string): Promise<unknown> {
@@ -179,6 +195,23 @@ function filterBundle(bundle: unknown, scope: string): unknown {
   const kept = entries.filter(allowed);
   if (kept.length === entries.length) return bundle;
   return { ...(bundle as object), entry: kept };
+}
+
+/**
+ * Applies `_elements` to the search matches: each keeps `resourceType`, `id`,
+ * `meta` and the named top-level elements. Included resources stay whole,
+ * as FHIR servers return them.
+ */
+function selectElements(bundle: unknown, elements: string[]): unknown {
+  const entries = entriesOf(bundle);
+  if (elements.length === 0 || entries.length === 0) return bundle;
+  const keep = new Set(["resourceType", "id", "meta", ...elements.map((e) => e.trim().replace(/^[A-Z]\w*\./, ""))]);
+  const trim = (entry: Entry & { search?: { mode?: string } }): Entry => {
+    if (!entry.resource || entry.search?.mode === "include") return entry;
+    const resource = Object.fromEntries(Object.entries(entry.resource).filter(([key]) => keep.has(key)));
+    return { ...entry, resource };
+  };
+  return { ...(bundle as object), entry: entries.map(trim) };
 }
 
 /**

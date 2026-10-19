@@ -1,3 +1,5 @@
+import { FHIR_ID } from "../fhir-id.js";
+
 /**
  * Reads the caller's FHIR Patient id from an access token claim
  * (OAUTH_PATIENT_CLAIM). Pure, so the accepted forms are tested directly.
@@ -8,10 +10,6 @@
  * A reference to any other resource type, such as `Practitioner/9`, is
  * refused, as is anything that isn't a valid FHIR id.
  */
-
-// FHIR R4 id datatype: https://hl7.org/fhir/R4/datatypes.html#id
-const FHIR_ID = /^[A-Za-z0-9\-.]{1,64}$/;
-
 export function patientIdFromClaim(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
   const parts = value.trim().split("/");

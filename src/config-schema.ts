@@ -219,6 +219,30 @@ export interface Config {
   fhir: { baseUrl: string; version: "R4"; auth: FhirAuthConfig };
 }
 
+/**
+ * Parses .env contents the way Docker Compose's `env_file` does, so a file
+ * means the same under `npm start` and `docker compose`: `#` lines and blank
+ * lines are skipped; a quoted value runs to its closing quote; in an unquoted
+ * value, whitespace then `#` starts a comment.
+ */
+export function parseDotEnv(contents: string): Record<string, string> {
+  const result: Record<string, string> = {};
+  for (const line of contents.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith("#")) continue;
+
+    const separator = trimmed.indexOf("=");
+    if (separator === -1) continue;
+
+    const key = trimmed.slice(0, separator).trim();
+    const raw = trimmed.slice(separator + 1).trim();
+    const quote = raw[0];
+    const end = quote === '"' || quote === "'" ? raw.indexOf(quote, 1) : -1;
+    result[key] = end > 0 ? raw.slice(1, end) : raw.replace(/\s+#.*$/, "");
+  }
+  return result;
+}
+
 export function parseConfig(env: Record<string, string | undefined>): Config {
   const result = EnvSchema.safeParse(env);
   if (!result.success) {

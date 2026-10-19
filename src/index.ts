@@ -7,8 +7,8 @@ import { SERVER_NAME, createServer } from "./server.js";
  * Entrypoint. MCP_TRANSPORT selects the transport:
  *
  *   stdio (default) — an MCP host spawns this process; see mcp.json.
- *   http            — Streamable HTTP on PORT, which is how it runs in
- *                     Kubernetes behind PingGateway.
+ *   http            — Streamable HTTP on PORT, an OAuth-protected service
+ *                     (Docker, Kubernetes).
  *
  * Note that stdio mode must never write to stdout: stdout IS the protocol
  * channel. All logging goes to stderr.

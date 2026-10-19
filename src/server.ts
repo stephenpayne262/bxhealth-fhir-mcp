@@ -44,7 +44,7 @@ export function createServer(available: ToolDefinition[] = availableTools()): Se
       tools: available.map((tool) => ({
         name: tool.name,
         description: tool.description,
-        inputSchema: zodSchemaToJsonSchema(tool.inputSchema),
+        inputSchema: buildJsonSchema(tool.inputSchema),
         annotations: { readOnlyHint: tool.readOnly },
       })),
     };
@@ -124,12 +124,7 @@ function auditToolCall(auth: AuthInfo | undefined, tool: string, outcome: "ok" |
 
 // ── Zod → JSON Schema (simple conversion for MCP) ────────────────────────────
 
-function zodSchemaToJsonSchema(schema: import("zod").ZodTypeAny): Record<string, unknown> {
-  // Use the Zod schema's _def to build a minimal JSON Schema
-  return buildJsonSchema(schema);
-}
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+/** Minimal JSON Schema from a Zod schema's `_def`; see CLAUDE.md for the supported types. */
 function buildJsonSchema(schema: any): Record<string, unknown> {
   const typeName = schema._def?.typeName as string | undefined;
 
@@ -139,7 +134,6 @@ function buildJsonSchema(schema: any): Record<string, unknown> {
       const properties: Record<string, unknown> = {};
       const required: string[] = [];
       for (const [key, value] of Object.entries(shape)) {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const fieldSchema = value as any;
         properties[key] = buildJsonSchema(fieldSchema);
         // If not optional/default, mark as required

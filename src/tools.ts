@@ -86,7 +86,7 @@ export const tools: ToolDefinition[] = [
     readOnly: true,
     patientSafe: true,
     description:
-      "Retrieve the FHIR server capability statement (TerminologyCapabilities / CapabilityStatement). " +
+      "Retrieve the FHIR server CapabilityStatement. " +
       "Describes supported resources, operations, search parameters, and server features.",
     inputSchema: z.object({}),
     async handler() {
@@ -266,7 +266,7 @@ export const tools: ToolDefinition[] = [
     }),
     async handler(input) {
       const { resourceType, id, patch, patchType } = input;
-      const result = await patchResource(resourceType, id, patch, patchType ?? "json-patch");
+      const result = await patchResource(resourceType, id, patch, patchType);
       return jsonResult(result);
     },
   }),
@@ -510,7 +510,7 @@ export const tools: ToolDefinition[] = [
       const result = await scopedSearch(ctx.patient, {
         resourceType: "Patient",
         searchParams: params,
-        count: count ?? 20,
+        count,
       });
       return jsonResult(result);
     },
@@ -564,7 +564,7 @@ export const tools: ToolDefinition[] = [
       const result = await scopedSearch(ctx.patient, {
         resourceType: "Observation",
         searchParams: params,
-        count: count ?? 20,
+        count,
         sort: "-date",
       });
       return jsonResult(result);
@@ -611,7 +611,7 @@ export const tools: ToolDefinition[] = [
       const result = await scopedSearch(ctx.patient, {
         resourceType: "Condition",
         searchParams: params,
-        count: count ?? 20,
+        count,
       });
       return jsonResult(result);
     },
@@ -669,7 +669,7 @@ export const tools: ToolDefinition[] = [
       const result = await scopedSearch(ctx.patient, {
         resourceType: "MedicationRequest",
         searchParams: params,
-        count: count ?? 20,
+        count,
         sort: "-authoredon",
       });
       return jsonResult(result);
@@ -715,7 +715,7 @@ export const tools: ToolDefinition[] = [
       const result = await scopedSearch(ctx.patient, {
         resourceType: "Encounter",
         searchParams: params,
-        count: count ?? 20,
+        count,
         sort: "-date",
       });
       return jsonResult(result);

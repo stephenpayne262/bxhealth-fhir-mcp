@@ -1,6 +1,7 @@
 import axios from "axios";
 import { config } from "./config.js";
 import { getAccessToken, clearTokenCache } from "./auth.js";
+import { FHIR_ID } from "./fhir-id.js";
 
 export type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
@@ -86,8 +87,6 @@ async function fhirRequest<T = unknown>(options: FhirRequestOptions): Promise<T>
 // ── Path building ─────────────────────────────────────────────────────────────
 
 const RESOURCE_TYPE = /^[A-Z][A-Za-z]+$/;
-// FHIR R4 id datatype: https://hl7.org/fhir/R4/datatypes.html#id
-const FHIR_ID = /^[A-Za-z0-9\-.]{1,64}$/;
 const OPERATION_NAME = /^[A-Za-z][A-Za-z0-9\-_.]*$/;
 
 function resourceTypeSegment(resourceType: string): string {

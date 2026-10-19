@@ -1,7 +1,7 @@
 {
   "name": "bxhealth-fhir-mcp",
   "version": "1.0.0",
-  "description": "MCP server providing tools to access a FHIR R4 server, deployable behind PingGateway",
+  "description": "MCP server exposing read-only tools for a FHIR R4 server, protected by OAuth 2.1",
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc",

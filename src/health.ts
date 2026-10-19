@@ -50,11 +50,10 @@ async function readyz(_req: Request, res: Response, oauth?: OAuthStatus): Promis
       },
     });
   } catch (error: unknown) {
+    // /readyz is public, and the FHIR error can carry server internals, so
+    // the detail goes to the log only.
     const message = error instanceof Error ? error.message : String(error);
-    res.status(503).json({
-      status: "not-ready",
-      reason: "fhir-unreachable",
-      detail: message,
-    });
+    console.error(`[readyz] FHIR not reachable: ${message}`);
+    res.status(503).json({ status: "not-ready", reason: "fhir-unreachable" });
   }
 }

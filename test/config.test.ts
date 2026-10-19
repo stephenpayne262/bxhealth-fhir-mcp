@@ -1,6 +1,6 @@
 import { describe, test } from "node:test";
 import assert from "node:assert/strict";
-import { parseConfig } from "../src/config-schema";
+import { parseConfig, parseDotEnv } from "../src/config-schema";
 
 const base = { FHIR_BASE_URL: "https://fhir.example.com/fhir" };
 const http = {
@@ -178,5 +178,34 @@ describe("tools and FHIR auth", () => {
 
   test("the old PINGONE_* variables are rejected", () => {
     assert.throws(() => parseConfig({ ...clientCredentials, PINGONE_ENV_ID: "env" }), /PINGONE_ENV_ID: is no longer read/);
+  });
+});
+
+describe(".env files", () => {
+  test("comments, quotes and blank lines are read as Docker Compose reads them", () => {
+    const contents = [
+      "# a comment",
+      "",
+      "PLAIN=value",
+      "PATTERNS=https://host/path/*   # same as the profile",
+      "HASH_IN_VALUE=abc#def",
+      'DOUBLE="quoted # not a comment" # but this is',
+      "SINGLE='single'",
+      "EMPTY=",
+      "  SPACED = padded  ",
+      "WINDOWS=crlf\r",
+      "# COMMENTED=out",
+      "no separator here",
+    ].join("\n");
+    assert.deepEqual(parseDotEnv(contents), {
+      PLAIN: "value",
+      PATTERNS: "https://host/path/*",
+      HASH_IN_VALUE: "abc#def",
+      DOUBLE: "quoted # not a comment",
+      SINGLE: "single",
+      EMPTY: "",
+      SPACED: "padded",
+      WINDOWS: "crlf",
+    });
   });
 });

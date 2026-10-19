@@ -165,6 +165,27 @@ describe("search", () => {
     await assert.rejects(call("fhir_search_observations", { patientId: "p2" }), /Access denied/);
   });
 
+  test("_elements and _summary=text are applied after the filter, so the caller's resources survive", async () => {
+    for (const args of [
+      { elements: ["status"] },
+      { searchParams: { _elements: "Observation.status" } },
+      { summary: "text" },
+      { searchParams: { _summary: "text" } },
+    ]) {
+      requests = [];
+      const result = await call("fhir_search_resources", { resourceType: "Observation", ...args });
+      const query = new URL(requests[0], "http://stub").searchParams;
+      assert.equal(query.get("_elements"), null, JSON.stringify(args));
+      assert.equal(query.get("_summary"), null, JSON.stringify(args));
+      assert.deepEqual(ids(result), ["Observation/o1", "Patient/p1", "Practitioner/dr", "Encounter/e1"], JSON.stringify(args));
+      // The match is trimmed; included resources stay whole.
+      assert.deepEqual(result.entry[0].resource, { resourceType: "Observation", id: "o1" }, JSON.stringify(args));
+      assert.deepEqual(result.entry[3].resource, e1);
+    }
+    await call("fhir_search_resources", { resourceType: "Observation", summary: "count" });
+    assert.equal(new URL(requests.at(-1)!, "http://stub").searchParams.get("_summary"), "count");
+  });
+
   test("without a patient (stdio, or scoping off) searches pass through", async () => {
     await call("fhir_search_resources", { resourceType: "Observation" }, null);
     assert.equal(path(requests[0]), "/fhir/Observation");
