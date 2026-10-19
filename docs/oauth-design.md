@@ -5,12 +5,19 @@ Phase 1 makes the MCP server an OAuth 2.1 resource server: every HTTP call to
 and MCP clients log the user in through the browser when they don't have one.
 Tools are read-only in this phase.
 
+Built since phase 1:
+
+- **OAuth from the MCP server to FHIR.** `FHIR_AUTH=client_credentials` gets
+  the server's own system-level token (aic-setup.md, section 9).
+- **Patient scoping.** Each member is limited to their own records; see
+  "Patient scoping" below.
+
 Later phases, not built yet:
 
-- **OAuth from the MCP server to FHIR.** `FHIR_AUTH` already separates this
-  from inbound auth.
 - **Token exchange (RFC 8693)** for a delegated token, so FHIR sees the user
-  rather than the server.
+  rather than the server. Smile CDR's agent endpoint accepts only system
+  tokens, so this would need a FHIR endpoint that takes patient-scoped
+  tokens.
 - **A gateway** in front of the server. The server keeps validating tokens
   itself even then, so bypassing the gateway does not grant access.
 - **Write tools,** behind their own scope.
@@ -118,6 +125,29 @@ startup error. Details: [cimd-plan.md](cimd-plan.md).
 operation. `fhir_validate_resource` is read-only, because `$validate` stores
 nothing.
 
+**Patient scoping (`MCP_PATIENT_SCOPED`, on by default for HTTP).** The
+outbound FHIR token is system-level and can read every patient, so the
+server itself limits each caller to one patient. The verifier reads the
+caller's Patient id from the token's `patient` claim (`OAUTH_PATIENT_CLAIM`),
+set by the authorization server from the member's login, and refuses a
+token without one with `403`. `src/patient-scope.ts` then:
+
+- forces `patient=Patient/{id}` onto searches and reads of patient-data
+  types. Compartment search (`/Patient/{id}/{type}`) would be the textbook
+  way, but Smile CDR answers it with `400`;
+- refuses any other patient's id, rather than silently replacing it, so the
+  model never presents the member's data as someone else's;
+- allows a fixed list of shared types and refuses every other type;
+- refuses `_revinclude`, `_has`, `_contained`, `_filter` and `_query`;
+- drops any returned resource that doesn't reference the caller's Patient,
+  which also covers `_include`, `$everything`, and a FHIR server that
+  ignores the forced parameter;
+- hides the tools it can't limit (patient search, vread, history, writes).
+  Patient scoping requires `MCP_READ_ONLY=true`.
+
+Every rule fails closed: an unknown type or parameter is refused, and Smile
+CDR rejects unknown search parameters with `400`.
+
 **What is never logged:** raw tokens and tool arguments. Arguments can contain
 names, identifiers and other patient data.
 
@@ -130,3 +160,8 @@ names, identifiers and other patient data.
   `OAUTH_CLIENT_MODE=cimd`.
 - Only bearer tokens in the `Authorization` header are accepted, not query
   parameters or form bodies, as OAuth 2.1 requires.
+- Under patient scoping, members can't read `_include`d resources unless
+  they reference the member (or are shared types), Binary attachments,
+  history, or versions.
+- FHIR sees every call as the server, not the member. The server's audit
+  log is the only record of which member asked.

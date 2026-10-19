@@ -164,7 +164,10 @@ from Ping's documentation. Paths are in the AM native console.
    - **Scope(s):** `fhir-mcp:read` only. Because `scope` is deny-listed, a
      document can't widen it. This is the least-privilege fix for the
      current, over-broad public client.
-   - **Grant types:** authorization code only.
+   - **Grant types:** authorization code and refresh token. The access token
+     modification script refuses an MCP refresh without a live AIC session
+     ([aic-setup.md](aic-setup.md), section 3). Leave refresh token out to
+     make members sign in again whenever a token expires.
    - **Token endpoint authentication method:** `none` (public client).
 5. **PKCE.** On the OAuth2 Provider, set **Code Verifier Parameter Required**
    to require PKCE for at least public clients, if it isn't already. CIMD

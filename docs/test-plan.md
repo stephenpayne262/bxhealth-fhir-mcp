@@ -20,7 +20,7 @@ them on every push. `test/oauth.test.ts` starts:
 | Area | Cases | File |
 | --- | --- | --- |
 | 401 challenge | No header → 401 with `resource_metadata` and `scope` in `WWW-Authenticate`. Basic scheme, empty bearer, garbage and `a.b.c` tokens → 401 | `oauth.test.ts` |
-| Valid tokens | RS256 and ES256 accepted. `aud` array containing ours accepted. `scp` array accepted. Full flow: initialize → tools/list (13 tools, all `readOnlyHint`) → tool call returns FHIR data | `oauth.test.ts` |
+| Valid tokens | RS256 and ES256 accepted. `aud` array containing ours accepted. `scp` array accepted. Full flow, with patient scoping off: initialize → tools/list (13 tools, all `readOnlyHint`) → tool call returns FHIR data | `oauth.test.ts` |
 | Read-only | Write tools absent from the list. Calling `fhir_delete_resource` by name → "Unknown tool". (stdio uses the same filter; checked manually) | `oauth.test.ts` |
 | Signature and algorithm | Unpublished key with a known `kid`, tampered payload, `alg: none`, HS256 with a shared secret, RS512 (valid key but not in the allowlist): all 401 | `oauth.test.ts` |
 | Time | Expired → 401. Expired by less than the skew → still 401. `nbf` beyond the skew → 401. `nbf` within the skew → accepted. Missing `exp` → 401 | `oauth.test.ts` |
@@ -46,19 +46,20 @@ corresponding tests failed.
 
 Prerequisites: [aic-setup.md](aic-setup.md) completed, including its step 6
 checklist, plus a `.env` with your FHIR URL, `MCP_PUBLIC_URL` and
-`OAUTH_ISSUER`.
+`OAUTH_ISSUER`. Patient scoping is on (the default), and the test members of
+aic-setup.md section 5 exist.
 
 | # | Step | Expected |
 | --- | --- | --- |
-| B1 | `docker build -f infra/Dockerfile -t bxhealth-fhir-mcp .` then `docker run --rm -p 3000:3000 --env-file .env bxhealth-fhir-mcp` | Log shows the listening URL, the OAuth resource and issuer, and `[oauth] issuer ... ready` |
+| B1 | `docker compose up --build -d`, then `docker compose logs mcp` | Log shows the listening URL, the OAuth resource and issuer, and `[oauth] issuer ... ready` |
 | B2 | `curl -s localhost:3000/healthz` and `curl -s localhost:3000/readyz` | 200 for both. `readyz` shows `oauth.state: ready` and your FHIR server's `fhirVersion` (4.x) |
 | B3 | `curl -s localhost:3000/.well-known/oauth-protected-resource/mcp` | `resource` = `MCP_PUBLIC_URL`, `authorization_servers` = `[OAUTH_ISSUER]`, `scopes_supported` = `["fhir-mcp:read"]` |
 | B4 | `curl -si -X POST localhost:3000/mcp -H 'Content-Type: application/json' -d '{}'` | `401` with `WWW-Authenticate: Bearer ... resource_metadata="http://localhost:3000/.well-known/oauth-protected-resource/mcp"` |
 | B5 | MCP Inspector: Streamable HTTP, `http://localhost:3000/mcp`, client ID, scope `openid fhir-mcp:read`, then connect | Browser opens the AIC login. After login the Inspector connects |
-| B6 | Inspector: List Tools | 13 tools, no create/update/patch/delete/transaction/execute_operation |
-| B7 | Inspector: run `fhir_search_patients` (e.g. `family`) and `fhir_get_metadata` | Data from your new FHIR server |
+| B6 | Inspector: List Tools | 9 tools. No writes, `fhir_execute_operation`, `fhir_search_patients`, vread or history |
+| B7 | Inspector: `fhir_search_resources` with `resourceType: Patient` and no parameters, then `fhir_get_metadata` | Only the member's own Patient (the `self` link has `_id=<their id>`), and the CapabilityStatement |
 | B8 | Claude Code: `claude mcp add --transport http bxhealth-fhir http://localhost:3000/mcp`, then `/mcp` and authenticate | Browser login, then the server shows as connected |
-| B9 | Claude Code: ask it to find a patient by name | Uses `fhir_search_patients` and returns data |
+| B9 | Claude Code: ask about "my conditions" or "my recent lab results" | Only the signed-in member's data |
 | B10 | Log in as the user (or client) without `fhir-mcp:read` | `403 insufficient_scope`. No tools are callable |
 | B11 | Decode the Inspector's token (command in [aic-setup.md](aic-setup.md)) | `iss` = `OAUTH_ISSUER` exactly, `aud` = `MCP_PUBLIC_URL`, `scope` includes `fhir-mcp:read` |
 | B12 | Send a request with the token's last character changed (curl with `-H "Authorization: Bearer ..."`) | `401 invalid_token` |
@@ -67,6 +68,11 @@ checklist, plus a `.env` with your FHIR URL, `MCP_PUBLIC_URL` and
 | B15 | `docker logs <container>` | `tool_call` audit lines with your `sub`. No token strings, no patient names or search values |
 | B16 | Run without `OAUTH_ISSUER` | Container exits immediately with "OAUTH_ISSUER is required" |
 | B17 | Run with a wrong `OAUTH_ISSUER` (e.g. without `:443`) | `/readyz` 503 with "must match exactly". Tool calls fail |
+| B18 | Claude Code: ask for another patient's data by id | `Access denied: patient="<id>" is not you`. Nothing for that patient is fetched |
+| B19 | Sign in as the second test member and repeat B7 | Their own Patient, a different id from B7 |
+| B20 | Sign in as the member without the patient attribute | `403`. Log: `no usable "patient" claim (sub=...)` |
+| B21 | With a short access token lifetime: let the token expire while signed in to AIC, then call a tool. Sign out of AIC in the browser and repeat | Signed in: the refresh works and calls continue. Signed out: the refresh is refused and the client asks you to sign in again; no `403` in the log |
+| B22 | With `FHIR_AUTH=client_credentials` against the agent endpoint, `curl -s localhost:3000/readyz` | `fhir.versionMatches: true`. A bad secret instead gives a `[fhir-auth]` log line with AIC's error |
 
 Claude Desktop and claude.ai connectors can't reach `localhost`, so they are
 tested in section C.
@@ -112,6 +118,6 @@ profile's pattern.
 
 ## Regression checks for every change
 
-- `npm run typecheck && npm test && npm run build`
+- `docker build -f infra/Dockerfile --target check .` (runs `npm run typecheck && npm test`; the runtime build runs `npm run build`)
 - B2 to B4 against a local container (a two-minute smoke test of the auth
   wiring)

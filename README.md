@@ -46,6 +46,7 @@ issuer (exact match), the audience, `exp`/`nbf`, `sub`, and the required scopes.
 | --- | --- |
 | No token, malformed, bad signature, wrong issuer/audience, expired | `401`, `error="invalid_token"` plus `resource_metadata` |
 | Valid token without the required scope | `403`, `error="insufficient_scope"` |
+| Valid token without a usable `patient` claim (patient scoping on) | `403`, `error="insufficient_scope"` |
 | Browser request from an origin not in `MCP_ALLOWED_ORIGINS` | `403` |
 | Issuer metadata or JWKS unreachable | `500`; `/readyz` reports `oauth-not-ready` |
 
@@ -57,8 +58,16 @@ Other guarantees:
 - **Sessions are not credentials.** A session is bound to the identity
   (issuer, subject, client) that opened it; another identity presenting the
   same `Mcp-Session-Id` gets `404`.
+- **Each member sees only their own records.** With `MCP_PATIENT_SCOPED=true`
+  (the default for HTTP), the token's `patient` claim names the caller's FHIR
+  Patient, and every tool call is limited to it: searches get
+  `patient=Patient/{id}` forced on, other patients' ids are refused, and
+  every returned resource must reference the caller. See
+  [Tools](#tools) and `src/patient-scope.ts`.
 - **No token passthrough.** The caller's token is never sent to FHIR. Calls to
-  FHIR use the server's own credentials (`FHIR_AUTH`), or none.
+  FHIR use the server's own credentials (`FHIR_AUTH`), or none. A
+  system-level FHIR token can read every patient, which is why patient
+  scoping stays on.
 - **Audit log.** Each tool call writes one JSON line to stderr with the
   caller's `sub` and `client_id`, the tool name, outcome and duration. Tokens
   and tool arguments (which can contain patient data) are never logged.
@@ -120,7 +129,20 @@ log and on `/readyz`, and every request fails until it is fixed.
 
 ## Run locally and in Docker
 
-Requires Node.js 22.12 or later.
+The simplest way, with nothing but Docker on the host:
+
+```bash
+docker compose up --build -d                         # HTTP on http://localhost:3000/mcp, config from .env
+docker compose logs -f mcp
+docker build -f infra/Dockerfile --target check .   # typecheck and tests
+```
+
+After changing only `.env`, run `docker compose up -d --force-recreate`; the
+container reads `.env` when it is created. Inside the container `localhost`
+is the container itself: reach services on the host at
+`host.docker.internal`.
+
+Without Docker, Node.js 22.12 or later is required:
 
 ```bash
 npm install
@@ -224,22 +246,33 @@ Tools are listed with the MCP `readOnlyHint` annotation. With
 `MCP_READ_ONLY=true` (the default) only read-only tools are listed, and calls
 to the others are rejected as unknown tools.
 
-| Tool | Read-only | Purpose |
-| --- | --- | --- |
-| `fhir_get_metadata` | yes | Server CapabilityStatement |
-| `fhir_read_resource` / `fhir_vread_resource` | yes | Read a resource, optionally at a version |
-| `fhir_search_resources` | yes | Search any resource type |
-| `fhir_resource_history` / `fhir_type_history` | yes | History for one resource or a whole type |
-| `fhir_patient_everything` | yes | `Patient/$everything` |
-| `fhir_validate_resource` | yes | `$validate` (POSTs the resource but stores nothing) |
-| `fhir_search_patients`, `_observations`, `_conditions`, `_medication_requests`, `_encounters` | yes | Convenience searches |
-| `fhir_create_resource` / `fhir_update_resource` / `fhir_patch_resource` / `fhir_delete_resource` | no | Write operations |
-| `fhir_transaction` | no | Transaction or batch Bundle |
-| `fhir_execute_operation` | no | Any `$operation`, including ones that modify data |
+With patient scoping on (the HTTP default), only the tools marked
+"Patient-scoped: yes" are listed, and they default to the signed-in member:
+`patientId` can be left out, and any other patient's id is refused.
+Searching Patient with no parameters returns the member's own record.
+Patient-data types (Observation, Condition, Claim and so on) and a list of
+shared types (Practitioner, Organization, Medication, terminology) are
+available; other types, such as Binary, are refused.
+
+| Tool | Read-only | Patient-scoped | Purpose |
+| --- | --- | --- | --- |
+| `fhir_get_metadata` | yes | yes | Server CapabilityStatement |
+| `fhir_read_resource` | yes | yes | Read a resource |
+| `fhir_vread_resource` | yes | no | Read a resource at a version |
+| `fhir_search_resources` | yes | yes | Search any resource type |
+| `fhir_resource_history` / `fhir_type_history` | yes | no | History for one resource or a whole type |
+| `fhir_patient_everything` | yes | yes | `Patient/$everything` |
+| `fhir_validate_resource` | yes | yes | `$validate` (POSTs the resource but stores nothing) |
+| `fhir_search_observations`, `_conditions`, `_medication_requests`, `_encounters` | yes | yes | Convenience searches |
+| `fhir_search_patients` | yes | no | Patient search by demographics |
+| `fhir_create_resource` / `fhir_update_resource` / `fhir_patch_resource` / `fhir_delete_resource` | no | no | Write operations |
+| `fhir_transaction` | no | no | Transaction or batch Bundle |
+| `fhir_execute_operation` | no | no | Any `$operation`, including ones that modify data |
 
 ## Testing
 
 ```bash
+docker build -f infra/Dockerfile --target check .   # typecheck and tests, in Docker
 npm test                                     # all suites
 npm test -- --test-name-pattern="audience"   # matching tests only
 ```
