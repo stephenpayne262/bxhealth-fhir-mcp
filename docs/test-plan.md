@@ -121,3 +121,22 @@ profile's pattern.
 - `docker build -f infra/Dockerfile --target check .` (runs `npm run typecheck && npm test`; the runtime build runs `npm run build`)
 - B2 to B4 against a local container (a two-minute smoke test of the auth
   wiring)
+
+## E. Public landing page and dashboard
+
+1. Open `/`: confirm all four client setup sections use the deployed public
+   origin, not GitHub Pages or an untrusted Host header. Check on mobile and
+   desktop; keyboard-focus the refresh button and links.
+2. Confirm `/dashboard/status` returns sanitized checks and a timestamp, with
+   no tokens, patient records, raw dependency responses, or internal URLs.
+3. Confirm the browser shows green PASS checkmarks only for passing checks;
+   errors/timeouts must be explicit FAIL states. Block status loading and
+   verify the page says health cannot be confirmed, not that the app is healthy.
+4. Verify public health/readiness, metadata, all CIMD URLs, MCP 401 enforcement,
+   AIC discovery, and JWKS. In test fixtures, exercise unavailable dependencies,
+   FHIR version mismatch, incorrect/oversized CIMD, and invalid issuer metadata.
+5. Repeated/concurrent refreshes share probes within a 30-second window. After
+   expiry a new refresh should probe again. Do not use the dashboard for pod
+   readiness or assume it proves authenticated client login.
+6. Test each client's login separately. VS Code's current callback document
+   still requires confirmation against AIC redirect matching and CORS/CSP.

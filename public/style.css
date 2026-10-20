@@ -1,0 +1,27 @@
+:root { color-scheme: light; font-family: system-ui, sans-serif; color: #142d3c; background: #f1f6f9; }
+* { box-sizing: border-box; }
+body { margin: 0; }
+main { max-width: 1080px; margin: auto; padding: 40px 24px; }
+header { background: #123647; color: white; padding: 36px; border-radius: 20px; margin-bottom: 28px; overflow-wrap: anywhere; }
+.eyebrow { color: #a0dfd3; font-size: .8rem; letter-spacing: .14em; font-weight: 700; }
+h1 { font-size: clamp(1.6rem, 5vw, 2.8rem); margin: 12px 0; }
+h2 { margin: 0; } h3 { margin-top: 0; }
+p, li { line-height: 1.6; }
+section { background: white; padding: 28px; border: 1px solid #d7e2e8; border-radius: 16px; margin-bottom: 24px; }
+.section-heading { display: flex; gap: 16px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
+button { background: #126454; color: white; border: 0; border-radius: 8px; padding: 12px 18px; font: inherit; cursor: pointer; }
+button:disabled { opacity: .6; cursor: wait; }
+button:focus-visible, a:focus-visible { outline: 3px solid #cf8700; outline-offset: 4px; }
+.note, footer { color: #516674; font-size: .9rem; line-height: 1.6; }
+.checks { list-style: none; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); gap: 12px; }
+.checks li { padding: 16px; border: 1px solid; border-radius: 10px; }
+.checks strong, .checks span { display: block; } .checks span { margin-top: 6px; font-size: .88rem; }
+.pass { background: #eef9f0; border-color: #93cba3 !important; color: #185b2a; }
+.fail { background: #fff1f0; border-color: #e3a5a0 !important; color: #8b2520; }
+article { border-top: 1px solid #d7e2e8; margin-top: 26px; padding-top: 26px; }
+pre { overflow-x: auto; padding: 20px; background: #102c3b; color: #e4f4ef; border-radius: 10px; line-height: 1.65; }
+code { font-family: ui-monospace, monospace; font-size: .9em; overflow-wrap: anywhere; }
+a { color: #086b60; } .warning { border-left: 4px solid #bb7f16; padding-left: 16px; }
+@media (max-width: 520px) { main { padding: 16px 12px; } header, section { padding: 22px 18px; } }
+
+.version { display: inline-block; padding: 5px 12px; border: 1px solid #70b7a7; border-radius: 20px; color: #c2f3e5; font-weight: 600; }

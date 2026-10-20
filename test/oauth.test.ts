@@ -579,3 +579,28 @@ describe("public CIMD documents", () => {
     assert.equal(response.status, 404);
   });
 });
+
+test("public landing page serves configured setup commands and self-hosted assets without changing MCP auth", async () => {
+  const response = await fetch(`${mcpBase}/`, { headers: { Host: "untrusted.example" } });
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get("content-type") ?? "", /text\/html/);
+  assert.match(response.headers.get("content-security-policy") ?? "", /script-src 'self'/);
+  const page = await response.text();
+  assert.ok(page.includes("BXHEALTH-FHIR-MCP"));
+  assert.ok(page.includes("Version 1.1.0"));
+  const health = await (await fetch(`${mcpBase}/healthz`)).json() as { version: string };
+  assert.equal(health.version, "1.1.0");
+  const manifest = require("../package.json") as { version: string };
+  assert.equal(health.version, manifest.version);
+  assert.ok(page.includes(PUBLIC_URL));
+  assert.ok(!page.includes("untrusted.example"));
+  assert.ok(!page.includes("{{PUBLIC_URL}}"));
+  for (const name of ["claude-code", "gemini-cli", "mcp-inspector", "vscode"]) {
+    assert.ok(page.includes(`/cimd/${name}.json`));
+  }
+  assert.equal((await fetch(`${mcpBase}/dashboard-assets/index.html`)).status, 404);
+  for (const asset of ["dashboard.js", "style.css"]) {
+    assert.equal((await fetch(`${mcpBase}/dashboard-assets/${asset}`)).status, 200);
+  }
+  assert.equal((await fetch(`${mcpBase}/mcp`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })).status, 401);
+});

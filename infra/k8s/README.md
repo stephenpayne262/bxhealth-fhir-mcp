@@ -1,7 +1,7 @@
 # Deploying bxhealth-fhir-mcp
 
 Target: Ping SE DevOps cluster `ping-dev-aws-us-east-2`, namespace
-`ping-devops-stephenpayne`. The service is exposed at
+`ping-devops-stephenpayne`. After deployment, the service is exposed at
 `https://bxhealth-fhir-mcp.ping-devops.com` by
 [`ingress.yml`](./ingress.yml). The Ingress routes to the Kubernetes Service
 on port 80; the Service forwards to the app on port 3000.
@@ -29,15 +29,26 @@ browser. CI gets a namespace-scoped ServiceAccount instead.
 kubectl apply -n ping-devops-stephenpayne -f infra/k8s/ci-rbac.yaml
 ```
 
-Then build the kubeconfig from the issued token:
+First confirm this namespace-scoped, long-lived credential is permitted by
+cluster policy and that GitHub-hosted runners can reach the Kubernetes API.
+If the API is private, use an approved self-hosted runner or networking setup.
+
+Then build the kubeconfig from the issued token. Run these steps in one shell;
+the temporary file is created outside the repository:
 
 ```bash
+umask 077
 NS=ping-devops-stephenpayne
+CI_DIR=$(mktemp -d)
+CI_CONFIG="$CI_DIR/config"
 SERVER=$(kubectl config view --minify -o jsonpath='{.clusters[0].cluster.server}')
 CA=$(kubectl get secret github-deployer-token -n $NS -o jsonpath='{.data.ca\.crt}')
 TOKEN=$(kubectl get secret github-deployer-token -n $NS -o jsonpath='{.data.token}' | base64 -d)
 
-cat > ci-kubeconfig.yaml <<CFG
+if [ -z "$SERVER" ] || [ -z "$CA" ] || [ -z "$TOKEN" ]; then
+  echo "Missing Kubernetes server, CA, or token; stop and resolve before proceeding." >&2
+else
+cat > "$CI_CONFIG" <<CFG
 apiVersion: v1
 kind: Config
 clusters:
@@ -52,17 +63,29 @@ users:
   user: { token: ${TOKEN} }
 CFG
 
-base64 < ci-kubeconfig.yaml | tr -d '\n' | gh secret set KUBE_CONFIG_B64
-gh secret set K8S_NAMESPACE --body "$NS"
-rm ci-kubeconfig.yaml
+fi
+unset TOKEN CA
 ```
 
 Verify it before trusting CI with it:
 
 ```bash
-KUBECONFIG=ci-kubeconfig.yaml kubectl auth whoami
-KUBECONFIG=ci-kubeconfig.yaml kubectl auth can-i patch deployments.apps -n $NS   # yes
-KUBECONFIG=ci-kubeconfig.yaml kubectl auth can-i get secrets -n $NS              # no
+KUBECONFIG="$CI_CONFIG" kubectl auth whoami
+KUBECONFIG="$CI_CONFIG" kubectl auth can-i patch deployments.apps -n $NS   # yes
+KUBECONFIG="$CI_CONFIG" kubectl auth can-i get secrets -n $NS              # no
+```
+
+After the expected permissions are verified, upload the credentials and remove
+the temporary file. Never commit or print the kubeconfig; base64 is not encryption.
+Rotate or revoke this credential according to cluster policy.
+
+```bash
+base64 < "$CI_CONFIG" | tr -d '\n' | gh secret set KUBE_CONFIG_B64 \
+  --repo stephenpayne262/bxhealth-fhir-mcp
+gh secret set K8S_NAMESPACE --body "$NS" --repo stephenpayne262/bxhealth-fhir-mcp
+rm "$CI_CONFIG"
+rmdir "$CI_DIR"
+unset CI_CONFIG CI_DIR SERVER NS
 ```
 
 ### 2. Cluster configuration and application secret
@@ -70,16 +93,16 @@ KUBECONFIG=ci-kubeconfig.yaml kubectl auth can-i get secrets -n $NS             
 Keep your local `.env` unchanged. Create a separate, gitignored cluster file:
 
 ```bash
-cp infra/k8s/cluster.env.example .env.k8s
+cp infra/k8s/cluster.env.example infra/k8s/.env.k8s
 ```
 
-Fill in the issuer and FHIR values in `.env.k8s`. FHIR and token endpoints
+Fill in the issuer and FHIR values in `infra/k8s/.env.k8s`. FHIR and token endpoints
 must be reachable from the cluster; `localhost` and `host.docker.internal`
 do not point at your Mac from a pod. Do not commit this file.
 
 ```bash
 kubectl create secret generic bxhealth-fhir-mcp-secrets -n ping-devops-stephenpayne \
-  --from-env-file=.env.k8s
+  --from-env-file=infra/k8s/.env.k8s
 ```
 
 Carries the cluster configuration: the `FHIR_*` settings (including
@@ -92,7 +115,7 @@ To update an existing Secret without printing its contents:
 
 ```bash
 kubectl create secret generic bxhealth-fhir-mcp-secrets -n ping-devops-stephenpayne \
-  --from-env-file=.env.k8s --dry-run=client -o yaml | kubectl apply -f -
+  --from-env-file=infra/k8s/.env.k8s --dry-run=client -o yaml | kubectl apply -f -
 kubectl rollout restart -n ping-devops-stephenpayne deployment/bxhealth-fhir-mcp
 ```
 
@@ -105,14 +128,36 @@ CI pushes `ghcr.io/stephenpayne262/bxhealth-fhir-mcp` using the workflow's
 own `GITHUB_TOKEN`; no registry secret is needed.
 
 **The package must be public**, because the manifest carries no
-`imagePullSecret`. GHCR packages inherit the repository's visibility on
-first push, so a package from a private repo starts private and the
-first deploy fails with `ImagePullBackOff` until it is flipped:
+`imagePullSecret`. Newly published container packages default to private;
+repository visibility does not make the container package public. After the
+first image publication, change the package visibility before deploying:
 
 > Package settings → Danger Zone → Change visibility → Public
 
 To keep it private instead, create a `docker-registry` secret from a PAT
 with `read:packages` and add `imagePullSecrets` back to the pod spec.
+
+To build and publish without GitHub Actions, use Docker Desktop from the
+repository root. Authenticate with an approved GHCR credential with
+`write:packages` permission; a GitHub CLI login alone does not guarantee that
+permission. Do not put the token in a command argument, tracked file, or image.
+
+```bash
+# Paste the registry token at Docker's password prompt, not your GitHub password.
+docker login ghcr.io --username stephenpayne262
+TAG=$(git rev-parse --short=7 HEAD)
+IMAGE=ghcr.io/stephenpayne262/bxhealth-fhir-mcp
+# Ensure the worktree is clean before publishing a commit-tagged image.
+git status --short
+docker build -f infra/Dockerfile --target check .
+docker buildx build --platform linux/arm64 --target runtime \
+  -f infra/Dockerfile -t "$IMAGE:$TAG" -t "$IMAGE:latest" --push .
+```
+
+These commands publish an image only; they do not apply Kubernetes manifests.
+The `latest` tag supports the manual manifest below; CI deploys a commit tag.
+Public images expose application code and bundled files, so never bake secrets
+into the image. The build context excludes environment files and `infra/`.
 
 ### 4. DNS, TLS, and CIMD cutover
 
@@ -120,9 +165,10 @@ Before exposing the app, confirm with the cluster administrator:
 
 - `nginx-public` is the correct IngressClass.
 - `bxhealth-fhir-mcp.ping-devops.com` resolves to the public ingress controller.
-- The TLS Secret `bxhealth-fhir-mcp-tls` exists in `ping-devops-stephenpayne`
-  and contains a certificate for that exact hostname. This manifest does not
-  provision certificates or DNS.
+- The ingress controller serves its existing valid `*.ping-devops.com`
+  default certificate. The Ingress intentionally omits `secretName`; no
+  app-specific TLS Secret is required. This manifest does not provision
+  certificates or DNS.
 - The namespace exists, and GitHub's deploy identity targets this namespace.
 
 The app publicly serves these documents without OAuth or redirects:
@@ -155,13 +201,18 @@ The public GHCR package must be pullable before the first successful rollout.
 ## Deploy
 
 Push to `main`; the workflow runs `check` → `build-and-push` → `deploy`.
+On forks, enable workflows on the repository's Actions page first. Manual
+workflow dispatch also requires the workflow to be registered on the default
+branch; a branch-only workflow may return HTTP 404.
+
 Manual workflow runs default to build-and-publish only. Enable the `deploy`
 input explicitly to deploy a manual run. To publish a branch without deploying:
 
 ```bash
 gh workflow run deploy-main.yml --ref PayneUpdate-cimd -f deploy=false
 ```
-Manually:
+
+Manually, after publishing the image, creating the application Secret, and verifying the controller certificate:
 
 ```bash
 kubectl apply -n ping-devops-stephenpayne -f infra/k8s/k8s.yaml
@@ -171,8 +222,16 @@ kubectl rollout status -n ping-devops-stephenpayne deploy/bxhealth-fhir-mcp
 
 ## Verify
 
-Verify the Ingress hostname and TLS certificate after applying the manifest
-(the TLS Secret `bxhealth-fhir-mcp-tls` must already exist in the namespace).
+Version 1.1.0 adds a public landing page at
+`https://bxhealth-fhir-mcp.ping-devops.com/` with a health dashboard and
+setup instructions for all four clients. `/mcp` remains the authenticated
+protocol endpoint. The dashboard calls public URLs from the pod, so allow
+outbound/hairpin access to the public host. Its results use a 30-second cache
+and five-second per-request budget, not the Kubernetes probe policy.
+
+
+Verify the Ingress hostname and the controller-provided TLS certificate
+after applying the manifest.
 Check the public endpoints without disabling certificate verification:
 
 ```bash

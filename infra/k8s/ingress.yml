@@ -27,4 +27,4 @@ spec:
   tls:
     - hosts:
         - bxhealth-fhir-mcp.ping-devops.com
-      secretName: bxhealth-fhir-mcp-tls
+      # Use the ingress controller's existing *.ping-devops.com certificate.

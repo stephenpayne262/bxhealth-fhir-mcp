@@ -311,3 +311,25 @@ push. Manual end-to-end steps for Docker and Kubernetes are in
 [docs/test-plan.md](docs/test-plan.md).
 
 Deployment to Kubernetes is described in [infra/k8s/README.md](infra/k8s/README.md).
+
+## Public landing page and health dashboard (1.1.0)
+
+HTTP mode serves a landing page at `/` with connection instructions for Claude
+Code, Gemini CLI, MCP Inspector, and VS Code. `/mcp` remains OAuth-protected.
+The public `/dashboard/status` endpoint returns sanitized checks with a UTC
+`checkedAt` timestamp, overall `ok`, and per-check `id`, `label`, `ok`, and
+`detail` fields. It never returns dependency URLs, credentials, or FHIR data.
+
+Checks reach the configured public host from the server (so DNS, TLS, and
+load-balancer hairpin access must work). They verify health/readiness, FHIR R4
+readiness, both protected-resource metadata URLs, all four CIMD documents,
+unauthenticated MCP rejection, and AIC issuer discovery/signing-key metadata.
+Requests have five-second timeouts (a slow dependency fails this dashboard budget even if it eventually responds), do not follow redirects, and share an
+in-flight refresh and 30-second per-process cache. Refreshing the page does
+not bypass the cache. A failed public route can cause dependent checks to
+fail even when the underlying FHIR service is healthy.
+
+Green checks do not establish successful user login, token signature checks,
+browser CORS/CSP compatibility, client registration, or patient authorization.
+Those require the authenticated manual tests. The root is now HTML rather
+than a 404. Kubernetes probes continue using `/healthz` unchanged.

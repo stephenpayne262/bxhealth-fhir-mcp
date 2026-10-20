@@ -7,6 +7,7 @@ import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import { config } from "./config.js";
+import { registerDashboard } from "./dashboard.js";
 import { healthz, readyzHandler } from "./health.js";
 import {
   protectedResourceMetadataHandler,
@@ -15,7 +16,7 @@ import {
 } from "./oauth/metadata.js";
 import { JwtTokenVerifier } from "./oauth/verifier.js";
 import { originGuard } from "./origin.js";
-import { createServer } from "./server.js";
+import { createServer, SERVER_VERSION } from "./server.js";
 
 /**
  * Streamable HTTP entrypoint.
@@ -97,6 +98,7 @@ export function buildApp(options: AppOptions = {}): express.Express {
 
   const app = express();
   app.disable("x-powered-by");
+  registerDashboard(app, { publicUrl, issuer: oauth.issuer, jwksUri: oauth.jwksUri }, SERVER_VERSION);
 
   // Health endpoints are registered before the JSON body parser and carry no
   // auth: kubelet probes must not depend on either.

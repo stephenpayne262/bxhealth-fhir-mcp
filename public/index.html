@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>BXHEALTH-FHIR-MCP | Health &amp; connections</title>
+  <link rel="stylesheet" href="/dashboard-assets/style.css">
+  <script src="/dashboard-assets/dashboard.js" defer></script>
+</head>
+<body>
+  <main>
+    <header><span class="eyebrow">HEALTHCARE CONNECTIVITY</span><h1>BXHEALTH-FHIR-MCP</h1><span class="version">Version {{VERSION}}</span>
+      <p>A secure bridge between your AI assistant and FHIR R4 health records.</p>
+      <p>MCP endpoint: <code>{{PUBLIC_URL}}</code></p>
+    </header>
+    <section aria-labelledby="health-title">
+      <div class="section-heading"><h2 id="health-title">Service health</h2><button id="refresh" type="button">Refresh checks</button></div>
+      <p id="summary" role="status" aria-live="polite">Loading health checks...</p>
+      <p class="note">Checks run from the server against its configured public URLs, including DNS and TLS. Each request must complete within five seconds, including FHIR readiness. Results are shared for 30 seconds. They do not prove browser CORS, client registration, login, or patient authorization works.</p>
+      <ul id="checks" class="checks"></ul>
+      <noscript>Enable JavaScript to view live checks, or request <a href="/dashboard/status">the JSON status endpoint</a>.</noscript>
+    </section>
+    <section aria-labelledby="connect-title"><h2 id="connect-title">Connect your assistant</h2>
+      <p>First configure AIC to allow this site's CIMD URLs and the MCP audience above. Login callbacks run on your computer, not in Kubernetes. AIC must be able to fetch the CIMD documents over public HTTPS; localhost URLs are for previewing this page only. Leave client secrets blank for these public clients. Never paste access tokens into chat.</p>
+      <article><h3>Claude Code</h3><p>Register the HTTP server, then run <code>/mcp</code> in Claude Code and authenticate. Remove an existing entry with the same name before replacing it.</p>
+<pre><code>claude mcp add --transport http \
+  --client-id {{ORIGIN}}/cimd/claude-code.json \
+  --callback-port 8765 \
+  bxhealth-fhir {{PUBLIC_URL}}</code></pre>
+      <a href="/cimd/claude-code.json">Claude Code client metadata</a></article>
+      <article><h3>Gemini CLI</h3><p>Merge this entry into your Gemini settings (for example <code>~/.gemini/settings.json</code>), preserving other servers. Then run <code>/mcp auth bxhealth-fhir</code> in Gemini.</p>
+<pre><code>{
+  "mcpServers": {
+    "bxhealth-fhir": {
+      "httpUrl": "{{PUBLIC_URL}}",
+      "oauth": {
+        "enabled": true,
+        "clientId": "{{ORIGIN}}/cimd/gemini-cli.json",
+        "redirectUri": "http://localhost:7777/oauth/callback",
+        "scopes": ["fhir-mcp:read"]
+      }
+    }
+  }
+}</code></pre><a href="/cimd/gemini-cli.json">Gemini CLI client metadata</a></article>
+      <article><h3>MCP Inspector</h3><pre><code>npx @modelcontextprotocol/inspector</code></pre>
+        <ol><li>Select <strong>Streamable HTTP</strong> and URL <code>{{PUBLIC_URL}}</code>.</li><li>Set OAuth client ID to <code>{{ORIGIN}}/cimd/mcp-inspector.json</code>, request scope <code>fhir-mcp:read</code>, and connect/authenticate.</li><li>Keep the callback on port 6274. If using direct browser mode, configure the server's allowed origins for your Inspector origin.</li></ol>
+        <p>Run Inspector only in your approved development environment; this command is not a Kubernetes deployment command.</p>
+        <a href="/cimd/mcp-inspector.json">MCP Inspector client metadata</a></article>
+      <article><h3>VS Code</h3><pre><code>code --add-mcp '{"name":"bxhealth-fhir","type":"http","url":"{{PUBLIC_URL}}","oauth":{"clientId":"{{ORIGIN}}/cimd/vscode.json"}}'</code></pre>
+        <p>Run <strong>MCP: List Servers</strong>, select <code>bxhealth-fhir</code>, and authenticate. AIC does not currently advertise CIMD support. If VS Code attempts DCR and offers <strong>Copy URIs &amp; Proceed</strong>, enter the client metadata URL above manually and leave the secret blank.</p>
+        <p class="warning">VS Code compatibility needs validation: the current document's portless loopback URI does not guarantee AIC accepts VS Code's actual callback port/path. Check the callback against the document and AIC profile. AIC must also allow VS Code's origin for discovery CORS and the callback in its CSP.</p>
+        <a href="/cimd/vscode.json">VS Code client metadata</a></article>
+    </section>
+    <footer>Read-only and patient-scoped by default. Public diagnostics contain no credentials, patient records, or internal endpoint URLs. No automatic changes are made by these checks.</footer>
+  </main>
+</body>
+</html>

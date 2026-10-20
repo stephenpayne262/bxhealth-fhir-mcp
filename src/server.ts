@@ -10,7 +10,7 @@ import { config } from "./config.js";
 import { type ToolDefinition, tools } from "./tools.js";
 
 export const SERVER_NAME = "bxhealth-fhir-mcp";
-export const SERVER_VERSION = "1.0.0";
+export const SERVER_VERSION = "1.1.0";
 
 /**
  * Builds a fresh MCP Server with the FHIR tool set wired up.
