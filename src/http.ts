@@ -1,12 +1,13 @@
 import { randomUUID } from "node:crypto";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 import express, { type Request, type Response } from "express";
 import { requireBearerAuth } from "@modelcontextprotocol/sdk/server/auth/middleware/bearerAuth.js";
 import type { AuthInfo } from "@modelcontextprotocol/sdk/server/auth/types.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
-import { config } from "./config.js";
+import { CimdStore } from "./admin/cimd.js";
+import { registerAdmin } from "./admin/routes.js";
+import { loadOverrides } from "./admin/store.js";
+import { config, dataDir } from "./config.js";
 import { registerDashboard } from "./dashboard.js";
 import { healthz, readyzHandler } from "./health.js";
 import {
@@ -84,6 +85,8 @@ function sessionIdOf(req: Request): string | undefined {
 export interface AppOptions {
   /** Injectable for tests; defaults to a verifier for the configured issuer. */
   verifier?: JwtTokenVerifier;
+  /** Injectable for tests; the admin console calls it after saving settings. */
+  restart?: () => void;
 }
 
 export function buildApp(options: AppOptions = {}): express.Express {
@@ -105,14 +108,14 @@ export function buildApp(options: AppOptions = {}): express.Express {
   app.get("/healthz", healthz);
   app.get("/readyz", readyzHandler(() => verifier.getStatus()));
 
-  for (const name of ["claude-code", "gemini-cli", "mcp-inspector", "vscode"]) {
-    const path = `/cimd/${name}.json`;
-    const template: unknown = JSON.parse(readFileSync(join(__dirname, "../cimd", `${name}.json`), "utf8"));
-    if (!template || typeof template !== "object" || Array.isArray(template)) {
-      throw new Error(`Invalid CIMD document: ${name}.json`);
-    }
-    const document = { ...template, client_id: new URL(path, publicUrl).href };
-    app.get(path, (_req, res) => res.json(document));
+  const cimd = new CimdStore(publicUrl, loadOverrides(dataDir).cimd);
+  app.get(/^\/cimd\/([a-z0-9][a-z0-9-]{0,62})\.json$/, (req, res) => {
+    const document = cimd.get(req.params[0]);
+    if (!document) return void res.status(404).json({ error: "Not found" });
+    res.json(document);
+  });
+  if (config.admin) {
+    registerAdmin(app, { ...config.admin, publicUrl, dataDir, cimd, restart: options.restart });
   }
 
   // Protected Resource Metadata is public: it is how an unauthenticated

@@ -80,6 +80,9 @@ const EnvSchema = z
     OAUTH_ALLOWED_CLIENT_IDS: list(/,/),
     OAUTH_CIMD_CLIENT_ID_PATTERNS: list(/,/),
     MCP_PATIENT_SCOPED: bool(true),
+    MCP_ADMIN: optionalString,
+    MCP_ADMIN_PASSWORD: z.string().optional().transform((v) => (v ? v : undefined)),
+    MCP_DATA_DIR: optionalString,
     OAUTH_PATIENT_CLAIM: z.string().trim().min(1).default("patient"),
 
     FHIR_BASE_URL: z.string().trim().url(),
@@ -114,6 +117,20 @@ const EnvSchema = z
           message: "must be true when MCP_PATIENT_SCOPED=true (write tools are not patient-scoped)",
         });
       }
+    }
+    if (Boolean(env.MCP_ADMIN) !== Boolean(env.MCP_ADMIN_PASSWORD)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["MCP_ADMIN"],
+        message: "MCP_ADMIN and MCP_ADMIN_PASSWORD must be set together",
+      });
+    }
+    if (env.MCP_ADMIN_PASSWORD && env.MCP_ADMIN_PASSWORD.length < 12) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["MCP_ADMIN_PASSWORD"],
+        message: "must be at least 12 characters",
+      });
     }
     for (const name of ["PINGONE_ENV_ID", "PINGONE_CLIENT_ID", "PINGONE_CLIENT_SECRET"] as const) {
       if (env[name]) {
@@ -214,6 +231,10 @@ export interface Config {
     allowedOrigins: string[];
   };
   tools: { readOnly: boolean };
+  /** Admin console login; absent means the console is disabled. */
+  admin?: { username: string; password: string };
+  /** Where admin overrides are persisted. */
+  dataDir?: string;
   /** Present whenever the HTTP transport is selected; null for stdio. */
   oauth: OAuthConfig | null;
   fhir: { baseUrl: string; version: "R4"; auth: FhirAuthConfig };
@@ -295,6 +316,8 @@ export function parseConfig(env: Record<string, string | undefined>): Config {
       allowedOrigins: e.MCP_ALLOWED_ORIGINS,
     },
     tools: { readOnly: e.MCP_READ_ONLY },
+    admin: e.MCP_ADMIN && e.MCP_ADMIN_PASSWORD ? { username: e.MCP_ADMIN, password: e.MCP_ADMIN_PASSWORD } : undefined,
+    dataDir: e.MCP_DATA_DIR,
     oauth,
     fhir: { baseUrl: e.FHIR_BASE_URL, version: "R4", auth: fhirAuth },
   };

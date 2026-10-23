@@ -209,3 +209,19 @@ describe(".env files", () => {
     });
   });
 });
+
+describe("admin console credentials", () => {
+  test("disabled unless both variables are set", () => {
+    assert.equal(parseConfig(http).admin, undefined);
+    assert.deepEqual(parseConfig({ ...http, MCP_ADMIN: "root", MCP_ADMIN_PASSWORD: "a-long-enough-password" }).admin, {
+      username: "root",
+      password: "a-long-enough-password",
+    });
+  });
+
+  test("rejects one without the other, and short passwords", () => {
+    assert.throws(() => parseConfig({ ...http, MCP_ADMIN: "root" }), /set together/);
+    assert.throws(() => parseConfig({ ...http, MCP_ADMIN_PASSWORD: "a-long-enough-password" }), /set together/);
+    assert.throws(() => parseConfig({ ...http, MCP_ADMIN: "root", MCP_ADMIN_PASSWORD: "short" }), /at least 12/);
+  });
+});

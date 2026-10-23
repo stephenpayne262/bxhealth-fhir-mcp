@@ -103,6 +103,8 @@ take precedence. `.env` is gitignored; never commit real credentials.
 | `OAUTH_PATIENT_CLAIM` | `patient` | Access token claim with the caller's FHIR Patient id (`123`, `Patient/123` or an absolute `.../Patient/123`). A token without it gets 403 |
 | `MCP_SESSION_IDLE_MINUTES` | `30` | Close HTTP sessions idle this long |
 | `MCP_MAX_SESSIONS` | `100` | Refuse new HTTP sessions (`503`) beyond this many |
+| `MCP_ADMIN` / `MCP_ADMIN_PASSWORD` | none | Enable the [admin console](#admin-console). Set both; password at least 12 characters |
+| `MCP_DATA_DIR` | temp directory | Where admin console edits are saved |
 | `MCP_ALLOWED_ORIGINS` | none | Comma-separated browser origins allowed to call `/mcp` (CORS). Requests without an `Origin` header (CLI and desktop clients) are always allowed |
 
 ### OAuth (required for `MCP_TRANSPORT=http`)
@@ -260,12 +262,44 @@ sticky sessions or a shared session store are added first.
 
 ## App-hosted CIMD documents
 
-HTTP mode serves public JSON at `/cimd/claude-code.json`,
-`/cimd/gemini-cli.json`, `/cimd/mcp-inspector.json`, and `/cimd/vscode.json`.
+HTTP mode serves public JSON at `/cimd/claude-ai.json`,
+`/cimd/claude-code.json`, `/cimd/gemini-cli.json`, `/cimd/mcp-inspector.json`,
+and `/cimd/vscode.json`, plus any documents added in the
+[admin console](#admin-console). `claude-ai.json` is for the hosted Claude apps
+(callbacks `https://claude.ai/api/mcp/auth_callback` and the `claude.com`
+equivalent). Until the authorization server advertises CIMD support in its
+metadata, Claude.ai needs the document URL entered by hand as the connector's
+OAuth Client ID (Advanced settings).
 Each document's client ID uses the origin of `MCP_PUBLIC_URL`; no OAuth is
 required to fetch it. Use a public HTTPS host reachable by AIC, not localhost.
 Callback URIs remain on the client machine. See [cimd/README.md](cimd/README.md)
 and the [Kubernetes deployment guide](infra/k8s/README.md) for cutover steps.
+
+## Admin console
+
+Set `MCP_ADMIN` and `MCP_ADMIN_PASSWORD` (at least 12 characters; both or
+neither) to enable `/admin` in HTTP mode. These two can only come from the
+environment. Sign in to:
+
+- Edit every setting in the tables above except `MCP_TRANSPORT`, `PORT`,
+  `HOST` and `MCP_DATA_DIR`. The whole configuration is validated before it is
+  saved, then the process exits so Docker or Kubernetes restarts it with the new
+  values. Secrets (`FHIR_CLIENT_SECRET`) are write-only: never displayed or
+  exported, and blank keeps the current value.
+- **Export to JSON** / **Import from JSON**: settings (without secrets) and
+  CIMD documents. Import validates everything before applying.
+- Add, edit, and delete CIMD documents served at `/cimd/<name>.json`. Changes
+  apply immediately. `client_id` is always forced to the document's own URL;
+  documents are limited to 5 KB, must be public clients, and allow only https
+  (or localhost http) redirect URIs. Deleting an edited built-in restores it.
+
+Saved changes live in `admin-overrides.json` under `MCP_DATA_DIR` (default: a
+temp directory; set it to a mounted volume to keep changes) and override the
+environment at startup. Protections: HttpOnly, Secure, SameSite=Strict session
+cookie, CSRF token and same-origin check on writes, idle and absolute session
+timeouts, and a lockout after 10 failed logins in 15 minutes. A new CIMD
+document's URL must still match `OAUTH_CIMD_CLIENT_ID_PATTERNS`. Kubernetes
+notes: [infra/k8s/README.md](infra/k8s/README.md#admin-console).
 
 ## Tools
 
@@ -322,7 +356,7 @@ The public `/dashboard/status` endpoint returns sanitized checks with a UTC
 
 Checks reach the configured public host from the server (so DNS, TLS, and
 load-balancer hairpin access must work). They verify health/readiness, FHIR R4
-readiness, both protected-resource metadata URLs, all four CIMD documents,
+readiness, both protected-resource metadata URLs, the built-in CIMD documents,
 unauthenticated MCP rejection, and AIC issuer discovery/signing-key metadata.
 Requests have five-second timeouts (a slow dependency fails this dashboard budget even if it eventually responds), do not follow redirects, and share an
 in-flight refresh and 30-second per-process cache. Refreshing the page does

@@ -4,10 +4,10 @@ Templates for the MCP clients used with this server in `OAUTH_CLIENT_MODE=cimd`
 (see [../docs/cimd-plan.md](../docs/cimd-plan.md) and
 [../docs/aic-setup.md](../docs/aic-setup.md#8-cimd-clients)).
 
-The HTTP app serves all four templates at `/cimd/claude-code.json`,
+The HTTP app serves all five templates at `/cimd/claude-ai.json`, `/cimd/claude-code.json`,
 `/cimd/gemini-cli.json`, `/cimd/mcp-inspector.json`, and `/cimd/vscode.json`.
 Each response replaces `client_id` with the document path on the origin of
-`MCP_PUBLIC_URL`. Only these four documents are exposed, not this directory.
+`MCP_PUBLIC_URL`. Only these five documents are exposed, not this directory.
 For the Kubernetes deployment, see [the deployment guide](../infra/k8s/README.md).
 Local HTTP URLs are useful for checking responses but cannot be fetched by
 AIC as CIMD client IDs; use public HTTPS for authentication.

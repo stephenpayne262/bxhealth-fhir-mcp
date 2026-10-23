@@ -1,0 +1,12 @@
+# Created once by hand; the CI deploy account cannot create PVCs.
+#   kubectl apply -n <namespace> -f infra/k8s/pvc.yaml
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: bxhealth-fhir-mcp-data
+spec:
+  accessModes: ["ReadWriteOnce"]
+  storageClassName: gp2
+  resources:
+    requests:
+      storage: 1Gi

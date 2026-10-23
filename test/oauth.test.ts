@@ -556,7 +556,7 @@ describe("issuer discovery", () => {
 });
 
 describe("public CIMD documents", () => {
-  for (const name of ["claude-code", "gemini-cli", "mcp-inspector", "vscode"]) {
+  for (const name of ["claude-ai", "claude-code", "gemini-cli", "mcp-inspector", "vscode"]) {
     test(`${name} is public JSON with the configured client ID`, async () => {
       const path = `/cimd/${name}.json`;
       const response = await fetch(`${mcpBase}${path}`, {

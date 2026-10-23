@@ -275,3 +275,18 @@ npx @modelcontextprotocol/inspector    # point at http://localhost:3000/mcp
   `kubectl delete -n ping-devops-stephenpayne -f infra/k8s/k8s.yaml`.
   Per SE DevOps policy cleanup is your responsibility;
   `kubectl scale --replicas=0` is the cheap idle state.
+
+## Admin console
+
+Set `MCP_ADMIN` and `MCP_ADMIN_PASSWORD` (12+ characters) in `.env.k8s`, recreate the
+Secret, and open `/admin` on the public host. It edits every setting except the admin
+login, `MCP_TRANSPORT`, `PORT` and `MCP_DATA_DIR`; validates the whole configuration
+before saving; then exits so Kubernetes restarts the container. Secrets are write-only and
+never exported. CIMD documents are edited live at `/cimd/NAME.json`, and JSON
+export/import covers settings and documents.
+
+Edits are saved to `MCP_DATA_DIR` (`/data`), backed by the `bxhealth-fhir-mcp-data`
+PersistentVolumeClaim, so they survive restarts and redeploys. Create the claim once with
+your own account (the CI account can't): `kubectl apply -n $NS -f infra/k8s/pvc.yaml`.
+Saved edits take precedence over the Secret, so delete the override (or the claim) to go
+back to the Secret's values.

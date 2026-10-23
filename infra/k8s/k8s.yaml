@@ -37,6 +37,13 @@ spec:
       labels:
         app: bxhealth-fhir-mcp
     spec:
+      securityContext:
+        # Makes the EBS volume writable by the non-root user (UID 1000).
+        fsGroup: 1000
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: bxhealth-fhir-mcp-data
       containers:
         - name: mcp
           # Tracks latest so a rollout restart ships updates without a
@@ -60,6 +67,11 @@ spec:
               value: "true"
             - name: MCP_PATIENT_SCOPED
               value: "true"
+            # Admin console overrides, kept on the bxhealth-fhir-mcp-data PVC
+            # so they survive restarts and redeploys. The claim is created
+            # once by hand (infra/k8s/pvc.yaml); the CI account cannot.
+            - name: MCP_DATA_DIR
+              value: "/data"
           envFrom:
             # FHIR_TOKEN_URL, FHIR_CLIENT_ID, FHIR_CLIENT_SECRET, FHIR_SCOPE,
             # FHIR_BASE_URL. The FHIR base URL is not a secret, but it
@@ -85,6 +97,9 @@ spec:
             initialDelaySeconds: 20
             periodSeconds: 30
             failureThreshold: 4
+          volumeMounts:
+            - name: data
+              mountPath: /data
           resources:
             requests:
               cpu: 100m

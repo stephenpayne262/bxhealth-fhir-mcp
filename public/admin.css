@@ -1,0 +1,14 @@
+label { display: block; margin: 12px 0; font-weight: 600; }
+input, textarea { display: block; width: 100%; margin-top: 6px; padding: 10px; font: inherit; border: 1px solid #9fb4c0; border-radius: 8px; }
+textarea { font-family: ui-monospace, monospace; font-size: .9rem; }
+.actions { display: flex; gap: 8px; flex-wrap: wrap; }
+button.secondary { background: #516674; }
+button.danger { background: #8b2520; }
+[hidden] { display: none !important; }
+#message:not(:empty) { padding: 12px 16px; border-radius: 8px; background: #eef9f0; color: #185b2a; }
+#message.error { background: #fff1f0; color: #8b2520; }
+.group { margin-top: 20px; font-size: 1.05rem; }
+.setting small { display: block; font-weight: 400; color: #516674; }
+.doc { border-top: 1px solid #d7e2e8; padding-top: 16px; margin-top: 16px; }
+.doc .actions { margin-top: 8px; }
+.badge { font-size: .75rem; background: #d7e2e8; border-radius: 10px; padding: 2px 8px; margin-left: 6px; }

@@ -65,7 +65,7 @@ validating the documents.
    loudly. A transition mode can be added if a gradual cut-over is needed.
 3. **Only canonical client ID URLs match** (`new URL(id).href === id`), so the
    string the server checks is the one AIC fetched.
-4. **The server hosts four fixed documents.** They are public `/cimd/*.json`
+4. **The server hosts a set of documents** (the five templates in `cimd/`, plus any added or edited in the admin console). They are public `/cimd/*.json`
    routes, outside `/mcp` authentication. Each response's `client_id` is
    derived from configured `MCP_PUBLIC_URL`, never incoming request headers.
    The original templates and local callback URIs remain in `cimd/`.

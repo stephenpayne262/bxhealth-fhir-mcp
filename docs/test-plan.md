@@ -122,9 +122,19 @@ profile's pattern.
 - B2 to B4 against a local container (a two-minute smoke test of the auth
   wiring)
 
+## F. Admin console
+
+Automated in `test/admin.test.ts`. Manual, after deploying with `MCP_ADMIN` set:
+
+1. `/admin` shows only a login form; `/admin/api/settings` returns `401` without a session.
+2. Sign in, change `MCP_MAX_SESSIONS`, save: the pod restarts and the new value shows after reload (and survives a redeploy, with the PVC mounted).
+3. An invalid value (for example an `http://` issuer) is rejected with a message and nothing restarts.
+4. Export has no `FHIR_CLIENT_SECRET` or admin password; importing it back succeeds.
+5. Add a CIMD document and fetch `/cimd/<name>.json`: `client_id` equals that URL.
+
 ## E. Public landing page and dashboard
 
-1. Open `/`: confirm all four client setup sections use the deployed public
+1. Open `/`: confirm the client setup sections use the deployed public
    origin, not GitHub Pages or an untrusted Host header. Check on mobile and
    desktop; keyboard-focus the refresh button and links.
 2. Confirm `/dashboard/status` returns sanitized checks and a timestamp, with

@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="robots" content="noindex">
+  <title>BXHEALTH-FHIR-MCP | Admin</title>
+  <link rel="stylesheet" href="/dashboard-assets/style.css">
+  <link rel="stylesheet" href="/admin-assets/admin.css">
+  <script src="/admin-assets/admin.js" defer></script>
+</head>
+<body>
+  <main>
+    <header><span class="eyebrow">ADMINISTRATION</span><h1>MCP Admin</h1></header>
+    <p id="message" role="status" aria-live="polite"></p>
+
+    <section id="login" hidden>
+      <h2>Sign in</h2>
+      <form id="login-form" autocomplete="on">
+        <label>Username <input id="username" name="username" autocomplete="username" required></label>
+        <label>Password <input id="password" name="password" type="password" autocomplete="current-password" required></label>
+        <button type="submit">Sign in</button>
+      </form>
+    </section>
+
+    <div id="app" hidden>
+      <section>
+        <div class="section-heading">
+          <h2>Settings</h2>
+          <div class="actions">
+            <button id="export" type="button">Export to JSON</button>
+            <button id="import" type="button">Import from JSON</button>
+            <input id="import-file" type="file" accept="application/json,.json" hidden>
+            <button id="logout" type="button" class="secondary">Sign out</button>
+          </div>
+        </div>
+        <p class="note">Saving a changed setting validates the whole configuration, then restarts the server so it takes effect. Secrets are never shown or exported; leave a secret blank to keep it. Clearing any other field unsets it.</p>
+        <form id="settings-form"><div id="settings"></div><button type="submit">Save and restart</button></form>
+      </section>
+
+      <section>
+        <h2>CIMD client documents</h2>
+        <p class="note">Served publicly at <code>/cimd/&lt;name&gt;.json</code>. The <code>client_id</code> is always set to the document's own URL. Changes apply immediately. Deleting a built-in document restores its default. For a client to be accepted, its URL must also match <code>OAUTH_CIMD_CLIENT_ID_PATTERNS</code>, and your authorization server must allow it.</p>
+        <div id="cimd-list"></div>
+        <h3>Add a document</h3>
+        <form id="cimd-new">
+          <label>Name <input id="new-name" pattern="[a-z0-9][a-z0-9\-]{0,62}" placeholder="my-client" required></label>
+          <label>JSON <textarea id="new-doc" rows="8" spellcheck="false" required>{
+  "client_name": "My client",
+  "redirect_uris": ["https://example.com/callback"],
+  "grant_types": ["authorization_code", "refresh_token"],
+  "response_types": ["code"],
+  "token_endpoint_auth_method": "none"
+}</textarea></label>
+          <button type="submit">Add document</button>
+        </form>
+      </section>
+    </div>
+  </main>
+</body>
+</html>
