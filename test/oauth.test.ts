@@ -598,9 +598,12 @@ test("public landing page serves configured setup commands and self-hosted asset
   for (const name of ["claude-code", "gemini-cli", "mcp-inspector", "vscode"]) {
     assert.ok(page.includes(`/cimd/${name}.json`));
   }
+  assert.equal(page.match(/class="copy-button"/g)?.length, 4);
   assert.equal((await fetch(`${mcpBase}/dashboard-assets/index.html`)).status, 404);
   for (const asset of ["dashboard.js", "style.css"]) {
-    assert.equal((await fetch(`${mcpBase}/dashboard-assets/${asset}`)).status, 200);
+    const response = await fetch(`${mcpBase}/dashboard-assets/${asset}`);
+    assert.equal(response.status, 200);
+    if (asset === "dashboard.js") assert.match(await response.text(), /navigator\.clipboard\.writeText/);
   }
   assert.equal((await fetch(`${mcpBase}/mcp`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })).status, 401);
 });

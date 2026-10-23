@@ -31,3 +31,23 @@ async function update() {
 }
 refresh.addEventListener("click", update);
 void update();
+
+for (const button of document.querySelectorAll(".copy-button")) {
+  button.addEventListener("click", async () => {
+    const pre = button.closest("pre");
+    const code = pre?.querySelector("code");
+    const status = pre?.querySelector(".copy-status");
+    if (!code || !status) return;
+
+    button.disabled = true;
+    status.textContent = "";
+    try {
+      await navigator.clipboard.writeText(code.textContent ?? "");
+      status.textContent = "Copied to clipboard.";
+    } catch {
+      status.textContent = "Could not copy. Select and copy the text manually.";
+    } finally {
+      button.disabled = false;
+    }
+  });
+}

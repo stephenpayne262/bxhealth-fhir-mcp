@@ -1,5 +1,5 @@
 {
-  "client_id": "https://stephenpayne262.github.io/cimd/vscode.json",
+  "client_id": "https://vscode.dev/oauth/client-metadata.json",
   "client_name": "Visual Studio Code (bxhealth-fhir-mcp)",
   "redirect_uris": [
     "http://127.0.0.1/"

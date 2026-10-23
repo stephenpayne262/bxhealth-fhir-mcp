@@ -20,6 +20,8 @@ button:focus-visible, a:focus-visible { outline: 3px solid #cf8700; outline-offs
 .fail { background: #fff1f0; border-color: #e3a5a0 !important; color: #8b2520; }
 article { border-top: 1px solid #d7e2e8; margin-top: 26px; padding-top: 26px; }
 pre { overflow-x: auto; padding: 20px; background: #102c3b; color: #e4f4ef; border-radius: 10px; line-height: 1.65; }
+.copy-button { float: right; margin: 0 0 12px 12px; padding: 7px 12px; }
+.copy-status { display: block; clear: both; min-height: 1.4em; color: #c2f3e5; font-size: .85rem; }
 code { font-family: ui-monospace, monospace; font-size: .9em; overflow-wrap: anywhere; }
 a { color: #086b60; } .warning { border-left: 4px solid #bb7f16; padding-left: 16px; }
 @media (max-width: 520px) { main { padding: 16px 12px; } header, section { padding: 22px 18px; } }

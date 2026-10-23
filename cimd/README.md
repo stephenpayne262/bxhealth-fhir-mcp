@@ -69,3 +69,20 @@ The template's `http://127.0.0.1/` redirect is not verified against AIC's
 matching rules. Before login, compare the actual VS Code callback (including
 port and path) with the document and any profile overrides. Do not assume
 that a portless loopback URI permits every port in AIC.
+
+`redirect_uris` is a JSON array of URI strings, not a comma- or
+space-delimited string. For a VS Code callback such as
+`http://127.0.0.1:33418/`, the stable loopback URI is
+`http://127.0.0.1/`; the client chooses a new port on each login. Do not put
+one observed ephemeral port in the document or use a wildcard port. RFC 8252
+recommends authorization servers allow any port for loopback IP redirect
+URIs, but verify that AIC honors this for your CIMD profile. If your profile
+pins `redirect_uri` using the metadata override denylist, configure and test
+that profile value as well.
+
+If VS Code sends `client_id=https://vscode.dev/oauth/client-metadata.json`,
+AIC fetches that VS Code-hosted document; it does not use this project's
+`cimd/vscode.json`. To use this project's document instead, configure VS Code
+with the deployed `/cimd/vscode.json` URL. Ensure both the AIC CIMD profile
+and the server's `OAUTH_CIMD_CLIENT_ID_PATTERNS` allow whichever client ID
+you choose.
