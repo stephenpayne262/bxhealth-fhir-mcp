@@ -1,6 +1,6 @@
 {
   "client_id": "https://vscode.dev/oauth/client-metadata.json",
-  "client_name": "Visual Studio Code (bxhealth-fhir-mcp)",
+  "client_name": "Visual Studio Code",
   "redirect_uris": [
     "http://127.0.0.1/"
   ],

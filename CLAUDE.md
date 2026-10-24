@@ -22,6 +22,16 @@ docker compose down
 - Rebuild with `docker compose up --build -d` after each code change. Nothing is bind-mounted.
 - The npm scripts below are what the containers run. They are listed for reference, not for use on the host.
 
+## Versioning
+
+For every change prepared for a new commit/build, bump the application version
+using Semantic Versioning (patch by default; use minor or major for the
+corresponding compatibility/feature change). Keep `package.json`,
+`package-lock.json`, and `SERVER_VERSION` in `src/server.ts` synchronized,
+update version assertions in tests, and add a dated release entry to
+`CHANGELOG.md`. The health endpoint, MCP server metadata, and landing page use
+these version sources, so verify they report the same version.
+
 ## Commands
 
 ```bash

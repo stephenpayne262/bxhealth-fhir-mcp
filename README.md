@@ -9,6 +9,9 @@ server (PingOne Advanced Identity Cloud in the reference setup). MCP clients
 discover where to log in from the server's 401 response and open the browser
 for the user automatically.
 
+Current application version: **1.1.1**. See [CHANGELOG.md](CHANGELOG.md) for
+release notes.
+
 - [How authentication works](#how-authentication-works)
 - [Configuration](#configuration)
 - [Run locally and in Docker](#run-locally-and-in-docker)
