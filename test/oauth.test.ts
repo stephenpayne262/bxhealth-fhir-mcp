@@ -587,9 +587,9 @@ test("public landing page serves configured setup commands and self-hosted asset
   assert.match(response.headers.get("content-security-policy") ?? "", /script-src 'self'/);
   const page = await response.text();
   assert.ok(page.includes("BXHEALTH-FHIR-MCP"));
-  assert.ok(page.includes("Version 1.1.1"));
+  assert.ok(page.includes("Version 1.1.2"));
   const health = await (await fetch(`${mcpBase}/healthz`)).json() as { version: string };
-  assert.equal(health.version, "1.1.1");
+  assert.equal(health.version, "1.1.2");
   const manifest = require("../package.json") as { version: string };
   assert.equal(health.version, manifest.version);
   assert.ok(page.includes(PUBLIC_URL));

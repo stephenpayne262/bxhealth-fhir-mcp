@@ -63,6 +63,10 @@ spec:
               value: "production"
             - name: MCP_PUBLIC_URL
               value: "https://bxhealth-fhir-mcp.ping-devops.com/mcp"
+            - name: OAUTH_CLIENT_MODE
+              value: "cimd"
+            - name: OAUTH_CIMD_CLIENT_ID_PATTERNS
+              value: "https://bxhealth-fhir-mcp.ping-devops.com/cimd/*,https://chatgpt.com/oauth/*"
             - name: MCP_READ_ONLY
               value: "true"
             - name: MCP_PATIENT_SCOPED

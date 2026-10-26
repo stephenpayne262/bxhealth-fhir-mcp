@@ -221,9 +221,12 @@ a **CIMD profile**. Background and design: [cimd-plan.md](cimd-plan.md).
 
 AIC added CIMD in the 29 Sep 2026 release ([Ping's CIMD
 page](https://docs.pingidentity.com/pingoneaic/am-oauth2/oauth2-cimd.html)).
-It does **not** advertise it in discovery yet (no
-`client_id_metadata_document_supported`), so MCP clients won't choose CIMD by
-themselves: give each one the document URL as its client ID.
+Rapid tenants now advertise CIMD support in discovery with
+`client_id_metadata_document_supported: true`, allowing compatible clients
+such as ChatGPT to select CIMD automatically. Confirm the flag is present in
+the target tenant's discovery document; tenant capabilities can vary. For
+clients that do not select CIMD automatically, configure the client ID
+explicitly. See the ChatGPT notes in [`cimd/README.md`](../cimd/README.md#chatgpt).
 
 1. **Check the release is installed.** In the native console: Realms >
    *realm* > Applications > OAuth 2.0 should have a **CIMD Profiles** tab.
@@ -236,7 +239,7 @@ themselves: give each one the document URL as its client ID.
 
    | Setting | Value |
    | --- | --- |
-   | CIMD Client ID URL Patterns | Where the documents are hosted, as narrowly as possible, e.g. `https://<host>/<path>/*`. Anyone who can publish a file under this prefix becomes a client |
+  | CIMD Client ID URL Patterns | Where the documents are hosted, as narrowly as possible, e.g. `https://<host>/<path>/*`. Anyone who can publish a file under this prefix becomes a client. For ChatGPT, add `https://chatgpt.com/oauth/*` only when enabling ChatGPT CIMD |
    | CIMD Metadata Override Deny List | `scope`, `grant_types`, `response_types`, `token_endpoint_auth_method`, `client_name` (step 7). Add `redirect_uri` to pin redirect URIs in the profile instead of trusting the document |
    | CIMD SSRF Protection Enabled | `true` (the default) |
 
@@ -248,6 +251,11 @@ themselves: give each one the document URL as its client ID.
    out to make members sign in again whenever a token expires), token
    endpoint authentication method `none`. With `scope` deny-listed, a document can't
    ask for more.
+   For a ChatGPT-specific profile, allow `openid`, `email`, and `fhir-mcp:read`:
+   the observed ChatGPT authorization request includes all three. Omitting a
+   requested scope causes `Invalid/unknown scopes`, even if the default scopes
+   include `fhir-mcp:read`. Keep `scope` deny-listed; this pins the allowed
+   scopes, not the scopes a client requests in the authorization URL.
 5. **PKCE.** On the OAuth2 Provider, make sure **Code Verifier Parameter
    Required** covers public clients. CIMD clients using `none` are public.
 6. **Audience script.** No change: the script in step 3 keys on the
@@ -270,8 +278,11 @@ themselves: give each one the document URL as its client ID.
     `form-action` directive also applies to the redirect after the consent
     form is submitted. Add the origin of every local callback to the
     tenant's CSP `form-action`: `http://localhost:8765` (Claude Code),
-    `http://localhost:6274` and `http://127.0.0.1:6274` (MCP Inspector), and
-    `http://localhost:7777` (Gemini CLI). In the admin console, go to
+      `http://localhost:6274` and `http://127.0.0.1:6274` (MCP Inspector),
+      `http://localhost:7777` (Gemini CLI), and `https://chatgpt.com` when
+      enabling ChatGPT. Use the exact ChatGPT callback URI shown in its
+      management page; callback mode depends on issuer identification support.
+      In the admin console, go to
     **Tenant Settings > Global Settings > Content Security Policy >
     Enforced Policy**, edit `form-action`, add the origins (no path), save,
     then click **Publish**. Changes take a few minutes. The policy covers
@@ -287,9 +298,17 @@ Then configure the server and connect a client:
 
 ```bash
 OAUTH_CLIENT_MODE=cimd
+# Append ,https://chatgpt.com/oauth/* to this and the AIC profile when enabled.
 OAUTH_CIMD_CLIENT_ID_PATTERNS=https://<host>/<path>/*   # same as the profile
 # and remove OAUTH_ALLOWED_CLIENT_IDS
 ```
+
+The server's patterns and AIC's profile patterns are independent checks.
+The Kubernetes manifest includes the hosted-document and ChatGPT patterns;
+other deployments must add ChatGPT explicitly. In the MCP admin console,
+change the pattern list under **Settings**, not **CIMD client documents**,
+then **Save and restart**. Admin overrides persist and take precedence over
+environment settings. See the [ChatGPT setup notes](../cimd/README.md#chatgpt).
 
 ```bash
 claude mcp add --transport http --client-id https://<host>/<path>/claude-code.json \

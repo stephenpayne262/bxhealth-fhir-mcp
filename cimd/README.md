@@ -1,4 +1,63 @@
+
 # Client ID Metadata Documents
+
+## ChatGPT
+
+ChatGPT hosts its own client metadata document. Do not add a local
+`cimd/chatgpt.json`: ChatGPT sends an OpenAI-owned URL as `client_id`, either
+`https://chatgpt.com/oauth/client.json` or, for callback-specific mode,
+`https://chatgpt.com/oauth/<callback_id>/client.json`. The exact document URL
+and callback are shown in ChatGPT's MCP server management page. See OpenAI's
+[OAuth guide](https://developers.openai.com/plugins/build/auth#oauth-flow).
+
+For ChatGPT to select CIMD automatically, the authorization server's discovery
+metadata must advertise `client_id_metadata_document_supported: true`. Rapid
+AIC tenants now advertise this capability; confirm it in the target tenant's
+discovery document because capabilities can vary by tenant.
+
+**AIC CIMD profile:** on the **CIMD** tab, enter
+`https://chatgpt.com/oauth/*` in **CIMD Client ID URL Patterns**. A separate
+ChatGPT profile can give this source its own consent name and scope settings.
+Keep profile patterns non-overlapping: AIC rejects a URL matching multiple
+profiles.
+
+**MCP server configuration:** add the same pattern to the comma-separated
+`OAUTH_CIMD_CLIENT_ID_PATTERNS` environment variable so this server accepts
+ChatGPT's `client_id`. Keep the existing pattern for your hosted client
+documents. For example:
+
+```env
+OAUTH_CIMD_CLIENT_ID_PATTERNS=https://<host>/<path>/*,https://chatgpt.com/oauth/*
+```
+
+These are two independent allowlists: AIC allows token issuance, while this
+MCP setting allows the resulting token's client ID. The Kubernetes
+[deployment manifest](../infra/k8s/k8s.yaml) and
+[cluster configuration example](../infra/k8s/cluster.env.example) include both
+the hosted-document and ChatGPT patterns. Other deployments must opt in.
+
+In the MCP admin console, edit `OAUTH_CIMD_CLIENT_ID_PATTERNS` under
+**Settings**, then **Save and restart**. Do not use **Add a document** for
+ChatGPT: that creates a document on this server, not an allowlist entry.
+Saved admin settings take precedence over deployment environment variables
+and persist across redeployments.
+
+On the AIC profile's **Core** tab, allow `openid`, `email`, and `fhir-mcp:read`
+in **Scope(s)**. The ChatGPT authorization request observed in testing asks
+for all three; allowing only `fhir-mcp:read` causes `Invalid/unknown scopes`.
+Keep `scope` on the metadata override deny list so the profile controls the
+allowed scopes. The MCP server still requires only `fhir-mcp:read`.
+
+Keep the ChatGPT redirect URIs matched to the exact URI(s) shown in ChatGPT's
+MCP server management page. When issuer identification is supported and
+returned correctly, the stable callback is
+`https://chatgpt.com/connector_platform_oauth_redirect`; otherwise it is
+callback-specific, such as
+`https://chatgpt.com/connector/oauth/<callback_id>`. Add the
+`https://chatgpt.com` origin to the tenant CSP's `form-action` directive.
+
+
+## Built-in Client Templates
 
 Templates for the MCP clients used with this server in `OAUTH_CLIENT_MODE=cimd`
 (see [../docs/cimd-plan.md](../docs/cimd-plan.md) and
@@ -63,8 +122,8 @@ force a new login.
 ## Visual Studio Code
 
 Use the document URL as the client ID and leave the client secret blank.
-AIC does not currently advertise CIMD in discovery. VS Code may attempt DCR
-first; its **Copy URIs & Proceed** dialog allows manual client ID entry.
+VS Code may attempt DCR first; its **Copy URIs & Proceed** dialog allows
+manual client ID entry if automatic CIMD discovery is not used.
 The template's `http://127.0.0.1/` redirect is not verified against AIC's
 matching rules. Before login, compare the actual VS Code callback (including
 port and path) with the document and any profile overrides. Do not assume

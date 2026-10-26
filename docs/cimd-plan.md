@@ -36,9 +36,9 @@ validating the documents.
 - **CIMD is new** (regular channel 23604.12, 29 Sep 2026, AME-33561) and is
   configured per realm as **CIMD Profiles**
   ([Ping's CIMD page](https://docs.pingidentity.com/pingoneaic/am-oauth2/oauth2-cimd.html)).
-- **It isn't advertised in discovery** (no
-  `client_id_metadata_document_supported`), so clients won't pick CIMD by
-  themselves. Each one is given the document URL as its client ID.
+- **Discovery support is available on rapid AIC tenants.** Their metadata
+  advertises `client_id_metadata_document_supported`; verify the target
+  tenant's discovery document, since capabilities can vary by tenant.
 - **The profile's URL patterns are the allowlist:** HTTPS, an optional
   trailing `/*`, an explicit port but no wildcard port. No match, or more
   than one, gives `invalid_client`.
@@ -74,10 +74,17 @@ validating the documents.
    both AIC's profile patterns and `OAUTH_CIMD_CLIENT_ID_PATTERNS`, then update
    client configurations and sign in again. Localhost-hosted documents cannot
    be fetched by AIC. See [deployment instructions](../infra/k8s/README.md).
-6. **Only documents we host are allowed.** Accepting a vendor's own document
-   URL (once AIC advertises CIMD) would mean trusting the vendor's redirect
-   URIs, and needs adding to both the AIC profile and
-   `OAUTH_CIMD_CLIENT_ID_PATTERNS`.
+6. **Vendor-hosted client documents require explicit trust.** ChatGPT uses
+    OpenAI-hosted CIMD URLs rather than a document hosted by this server. Rapid
+    AIC tenants advertise CIMD discovery; verify the target tenant, then allow
+    `https://chatgpt.com/oauth/*` in both the AIC profile and
+    `OAUTH_CIMD_CLIENT_ID_PATTERNS`. Also allow the callback URI shown in
+    ChatGPT's management page. Do not add a local ChatGPT template. The
+    Kubernetes deployment now includes this opt-in in its manifest and
+    cluster configuration example; it is not a global application default.
+    The ChatGPT profile must allow the observed requested scopes `openid`,
+    `email`, and `fhir-mcp:read`. See the [ChatGPT setup notes](../cimd/README.md#chatgpt)
+    for admin settings and override precedence.
 
 ## What CIMD does not fix
 

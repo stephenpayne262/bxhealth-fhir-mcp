@@ -96,6 +96,28 @@ describe("cimd mode: prefix pattern", () => {
     assert.ok(!allowed("https://a.example/c/y.json", policy));
   });
 
+  test("ChatGPT and hosted documents can be allowed without trusting other URLs", () => {
+    const policy = cimd(
+      "https://bxhealth-fhir-mcp.ping-devops.com/cimd/*",
+      "https://chatgpt.com/oauth/*"
+    );
+    for (const id of [
+      "https://bxhealth-fhir-mcp.ping-devops.com/cimd/claude-code.json",
+      "https://chatgpt.com/oauth/client.json",
+      "https://chatgpt.com/oauth/callback-id/client.json",
+    ]) {
+      assert.ok(allowed(id, policy), id);
+    }
+    for (const id of [
+      "https://chatgpt.com/other/client.json",
+      "https://chatgpt.com/oauthevil/client.json",
+      "https://chatgpt.com.attacker.example/oauth/client.json",
+      "https://other.example/oauth/client.json",
+    ]) {
+      assert.ok(!allowed(id, policy), id);
+    }
+  });
+
   test("the reason names what failed", () => {
     assert.match(clientRejection(undefined, policy) ?? "", /no client_id/);
     assert.match(clientRejection("fhir-mcp-public", policy) ?? "", /not a canonical https/);

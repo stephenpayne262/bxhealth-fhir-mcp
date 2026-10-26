@@ -120,7 +120,13 @@ kubectl rollout restart -n ping-devops-stephenpayne deployment/bxhealth-fhir-mcp
 ```
 
 The Deployment pins HTTP transport, the public MCP URL, read-only access,
-and patient scoping so local settings cannot accidentally override them.
+patient scoping, CIMD client mode, and the accepted client URL patterns.
+Its patterns accept documents hosted at
+`https://bxhealth-fhir-mcp.ping-devops.com/cimd/*` and ChatGPT documents at
+`https://chatgpt.com/oauth/*`, without requiring a manual Secret or admin edit.
+Explicit Deployment environment entries take precedence over `envFrom` values.
+Saved admin overrides still take precedence over the environment and survive
+redeployments on the PVC; keep any saved pattern list aligned with the manifest.
 
 ### 3. Container image
 
@@ -190,6 +196,13 @@ Code's actual callback against the document: its portless loopback entry
 has not been verified against AIC's redirect matching. AIC's CORS and CSP
 configuration must also allow the client flows; see
 [the AIC setup guide](../../docs/aic-setup.md).
+
+For ChatGPT, AIC must also allow `https://chatgpt.com/oauth/*` in exactly one
+CIMD profile. On that profile's Core tab, allow `openid`, `email`, and
+`fhir-mcp:read`, and configure the exact ChatGPT callback URI. The MCP server
+allowlist alone does not configure AIC. ChatGPT hosts its own client document;
+do not add one in the MCP admin console. See
+[ChatGPT setup](../../cimd/README.md#chatgpt).
 
 ### 5. GitHub Actions configuration
 
